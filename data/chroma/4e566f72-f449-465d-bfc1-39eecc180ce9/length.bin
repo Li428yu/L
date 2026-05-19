@@ -1,0 +1,1 @@
+invalid type: string "printf(\"接收回显：%s\\n\", buf); } else if (recvLen == 0) { printf(\"服务端已主动关闭连接\\n\"); } else { printf(\"接收数据失败！错误码：%d\\n\", WSAGetLastError()); } // 9. 释放资源 closesocket(sClient); WSACleanup(); return 0; } 序号 | 实验分数构成 | 分数 1 | 实验过程(40分)（包括实验指导教师提问回答情况） ", expe

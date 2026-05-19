@@ -1,0 +1,27 @@
+{
+  "suite_name": "sample_paper_regression",
+  "description": "替换为固定论文后的回归评测集。每个 case 用来观察检索命中、引用页码和关键词覆盖。",
+  "cases": [
+    {
+      "id": "core_contribution",
+      "question": "这篇论文的核心贡献是什么？请给出证据。",
+      "expected_keywords": ["方法", "贡献", "结果"],
+      "expected_document": null,
+      "expected_page": null
+    },
+    {
+      "id": "method_details",
+      "question": "请总结论文的方法设计，并指出关键模块。",
+      "expected_keywords": ["方法", "模块", "实验"],
+      "expected_document": null,
+      "expected_page": null
+    },
+    {
+      "id": "limitations",
+      "question": "这篇论文有哪些局限性？",
+      "expected_keywords": ["局限", "不足", "未来"],
+      "expected_document": null,
+      "expected_page": null
+    }
+  ]
+}
