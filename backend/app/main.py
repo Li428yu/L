@@ -85,10 +85,18 @@ def models() -> ModelCatalog:
                 id=item.id,
                 label=item.label,
                 description=item.description,
+                chat_model=item.chat_model,
+                embedding_model=item.embedding_model,
+                top_k=item.top_k,
             )
             for item in presets
         ],
         default_preset=settings.resolve_model_preset(settings.default_model_preset).id,
+        chat_model_options=settings.chat_model_options,
+        embedding_model_options=settings.embedding_model_options,
+        default_chat_model=settings.default_chat_model,
+        default_embedding_model=settings.default_embedding_model,
+        default_top_k=settings.default_top_k,
     )
 
 
@@ -266,7 +274,13 @@ def get_document_file(document_id: str) -> FileResponse:
         if path.suffix.lower() == ".docx"
         else "application/pdf"
     )
-    return FileResponse(path, media_type=media_type, filename=document.file_name)
+    disposition = "attachment" if path.suffix.lower() == ".docx" else "inline"
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=document.file_name,
+        content_disposition_type=disposition,
+    )
 
 
 @app.post("/api/chat", response_model=AskResponse)

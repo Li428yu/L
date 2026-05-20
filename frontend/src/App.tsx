@@ -45,6 +45,13 @@ interface ConversationContextMenu {
   y: number;
 }
 
+interface StoredModelSettings {
+  modelPreset?: string;
+  chatModel?: string;
+  embeddingModel?: string;
+  topK?: number;
+}
+
 const starterQuestions = [
   "请分别概括每篇文档讲了什么。",
   "请分别说出每篇文档最重要的发现。",
@@ -54,6 +61,31 @@ const starterQuestions = [
 
 const ACTIVE_CONVERSATION_STORAGE_KEY = "paper-reading-assistant.active-conversation-id";
 const DELETED_CONVERSATIONS_STORAGE_KEY = "paper-reading-assistant.deleted-conversation-ids";
+const MODEL_SETTINGS_STORAGE_KEY = "paper-reading-assistant.model-settings";
+
+function readStoredModelSettings(): StoredModelSettings {
+  try {
+    const raw = window.localStorage.getItem(MODEL_SETTINGS_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as StoredModelSettings;
+    return typeof parsed === "object" && parsed ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function clampTopK(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 5;
+  }
+  return Math.min(Math.max(Math.round(value), 1), 20);
+}
+
+function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+}
 
 function deletedConversationIds(): string[] {
   try {
@@ -109,6 +141,10 @@ function App() {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [models, setModels] = useState<ModelCatalog | null>(null);
   const [modelPreset, setModelPreset] = useState("balanced");
+  const [chatModel, setChatModel] = useState("");
+  const [embeddingModel, setEmbeddingModel] = useState("");
+  const [topK, setTopK] = useState(5);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [task, setTask] = useState<TaskInfo | null>(null);
   const [conversations, setConversations] = useState<ConversationDraft[]>([newConversation()]);
   const [activeConversationId, setActiveConversationId] = useState("");
@@ -147,8 +183,14 @@ function App() {
     loadConversationHistory();
     getModels()
       .then((catalog) => {
+        const storedSettings = readStoredModelSettings();
+        const preset = catalog.presets.find((item) => item.id === storedSettings.modelPreset) ||
+          catalog.presets.find((item) => item.id === catalog.default_preset);
         setModels(catalog);
-        setModelPreset(catalog.default_preset);
+        setModelPreset(preset?.id || catalog.default_preset);
+        setChatModel(storedSettings.chatModel || preset?.chat_model || catalog.default_chat_model);
+        setEmbeddingModel(storedSettings.embeddingModel || preset?.embedding_model || catalog.default_embedding_model);
+        setTopK(clampTopK(storedSettings.topK ?? preset?.top_k ?? catalog.default_top_k));
       })
       .catch((error: Error) => setNotice(toFriendlyError(error.message)));
   }, []);
@@ -178,6 +220,21 @@ function App() {
       window.localStorage.setItem(ACTIVE_CONVERSATION_STORAGE_KEY, activeConversation.conversationId);
     }
   }, [activeConversation?.conversationId, activeConversation?.id]);
+
+  useEffect(() => {
+    if (!models) {
+      return;
+    }
+    window.localStorage.setItem(
+      MODEL_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        modelPreset,
+        chatModel,
+        embeddingModel,
+        topK
+      })
+    );
+  }, [models, modelPreset, chatModel, embeddingModel, topK]);
 
   useEffect(() => {
     if (!conversationMenu) {
@@ -304,6 +361,24 @@ function App() {
     }
   }
 
+  function applyModelPreset(presetId: string) {
+    setModelPreset(presetId);
+    const preset = models?.presets.find((item) => item.id === presetId);
+    if (!preset) {
+      return;
+    }
+    setChatModel(preset.chat_model);
+    setEmbeddingModel(preset.embedding_model);
+    setTopK(clampTopK(preset.top_k));
+  }
+
+  function resetModelSettings() {
+    if (!models) {
+      return;
+    }
+    applyModelPreset(models.default_preset);
+  }
+
   async function handleAsk() {
     const cleanQuestion = question.trim();
     if (!cleanQuestion) {
@@ -368,7 +443,10 @@ function App() {
           question: cleanQuestion,
           conversation_id: activeConversation.conversationId,
           document_ids: readyDocuments.map((document) => document.id),
-          model_preset: modelPreset
+          model_preset: modelPreset,
+          chat_model: chatModel || undefined,
+          embedding_model: embeddingModel || undefined,
+          top_k: topK
         },
         {
           onStatus: (status) => {
@@ -551,6 +629,8 @@ function App() {
   }
 
   const activePreset = models?.presets.find((item) => item.id === modelPreset);
+  const chatModelOptions = uniqueNonEmpty([chatModel, ...(models?.chat_model_options || [])]);
+  const embeddingModelOptions = uniqueNonEmpty([embeddingModel, ...(models?.embedding_model_options || [])]);
   const latestAssistantMessage = [...activeConversation.messages]
     .reverse()
     .find((message) => message.role === "assistant");
@@ -602,6 +682,24 @@ function App() {
         </div>
       )}
 
+      {settingsOpen && (
+        <SettingsPanel
+          catalog={models}
+          modelPreset={modelPreset}
+          chatModel={chatModel}
+          embeddingModel={embeddingModel}
+          topK={topK}
+          chatModelOptions={chatModelOptions}
+          embeddingModelOptions={embeddingModelOptions}
+          onClose={() => setSettingsOpen(false)}
+          onPresetChange={applyModelPreset}
+          onChatModelChange={setChatModel}
+          onEmbeddingModelChange={setEmbeddingModel}
+          onTopKChange={(value) => setTopK(clampTopK(value))}
+          onReset={resetModelSettings}
+        />
+      )}
+
       <button
         className="column-resizer"
         type="button"
@@ -618,6 +716,20 @@ function App() {
           <div>
             <h1>和文档对话</h1>
             <p>上传 PDF 或 DOCX，然后像聊天一样提问。我会在右侧给出原文证据。</p>
+          </div>
+          <div className="top-actions">
+            <button
+              className="settings-button"
+              type="button"
+              aria-label="打开模型和检索设置"
+              title="模型和检索设置"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M19.4 13.5c.1-.5.1-1 .1-1.5s0-1-.1-1.5l2-1.5-2-3.5-2.4 1a7.3 7.3 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.3 7.3 0 0 0 7 6.5l-2.4-1-2 3.5 2 1.5c-.1.5-.1 1-.1 1.5s0 1 .1 1.5l-2 1.5 2 3.5 2.4-1a7.3 7.3 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.3 7.3 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z" />
+              </svg>
+              设置
+            </button>
           </div>
         </header>
 
@@ -785,6 +897,13 @@ function EvidenceViewer({
   evidence: EvidenceItem | null;
   documents: DocumentInfo[];
 }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const evidenceKey = evidence ? `${evidence.document_id}:${evidence.chunk_id}:${evidence.page}` : "";
+
+  useEffect(() => {
+    setPreviewOpen(false);
+  }, [evidenceKey]);
+
   if (!evidence) {
     return (
       <section className="source-card empty-source">
@@ -813,15 +932,25 @@ function EvidenceViewer({
         <summary>展开上下文</summary>
         <p className="source-text">{maskSensitiveText(evidence.text)}</p>
       </details>
-      <a
-        className="open-source"
-        href={documentFileUrl(evidence.document_id, isPdf ? evidence.page : undefined)}
-        target="_blank"
-        rel="noreferrer"
-      >
-        {isPdf ? "打开原 PDF 位置" : "下载原 DOCX"}
-      </a>
-      {isPdf && (
+      <div className="source-actions">
+        <a
+          className="open-source"
+          href={documentFileUrl(evidence.document_id, isPdf ? evidence.page : undefined)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {isPdf ? "打开原 PDF 位置" : "下载原 DOCX"}
+        </a>
+        {isPdf && (
+          <button className="preview-source" type="button" onClick={() => setPreviewOpen((current) => !current)}>
+            {previewOpen ? "收起右侧预览" : "在右侧预览 PDF"}
+          </button>
+        )}
+      </div>
+      {isPdf && !previewOpen && (
+        <p className="pdf-preview-note">PDF 不会在刷新页面时自动加载；需要预览原文时再点击上方按钮。</p>
+      )}
+      {isPdf && previewOpen && (
         <iframe
           className="pdf-frame"
           title="PDF 原文预览"
@@ -829,6 +958,130 @@ function EvidenceViewer({
         />
       )}
     </section>
+  );
+}
+
+function SettingsPanel({
+  catalog,
+  modelPreset,
+  chatModel,
+  embeddingModel,
+  topK,
+  chatModelOptions,
+  embeddingModelOptions,
+  onClose,
+  onPresetChange,
+  onChatModelChange,
+  onEmbeddingModelChange,
+  onTopKChange,
+  onReset
+}: {
+  catalog: ModelCatalog | null;
+  modelPreset: string;
+  chatModel: string;
+  embeddingModel: string;
+  topK: number;
+  chatModelOptions: string[];
+  embeddingModelOptions: string[];
+  onClose: () => void;
+  onPresetChange: (value: string) => void;
+  onChatModelChange: (value: string) => void;
+  onEmbeddingModelChange: (value: string) => void;
+  onTopKChange: (value: number) => void;
+  onReset: () => void;
+}) {
+  const selectedPreset = catalog?.presets.find((item) => item.id === modelPreset);
+
+  return (
+    <div className="settings-backdrop" onClick={onClose}>
+      <section
+        className="settings-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="settings-head">
+          <div>
+            <span>基础配置</span>
+            <h2 id="settings-title">模型和检索设置</h2>
+            <p>这些配置会用于下一次提问。API Key 和服务地址仍然只放在后端环境变量里。</p>
+          </div>
+          <button className="settings-close" type="button" aria-label="关闭设置" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <label className="settings-field">
+          <span>阅读模式</span>
+          <select
+            value={modelPreset}
+            disabled={!catalog}
+            onChange={(event) => onPresetChange(event.target.value)}
+          >
+            {(catalog?.presets || []).map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <small>{selectedPreset?.description || "后端模型目录加载中。"}</small>
+        </label>
+
+        <label className="settings-field">
+          <span>对话模型</span>
+          <select value={chatModel} onChange={(event) => onChatModelChange(event.target.value)} disabled={!chatModelOptions.length}>
+            {chatModelOptions.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+          <small>负责理解问题、组织回答和引用证据。</small>
+        </label>
+
+        <label className="settings-field">
+          <span>Embedding 模型</span>
+          <select
+            value={embeddingModel}
+            onChange={(event) => onEmbeddingModelChange(event.target.value)}
+            disabled={!embeddingModelOptions.length}
+          >
+            {embeddingModelOptions.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+          <small>负责把问题和文档片段变成向量，用于检索相似原文。</small>
+        </label>
+
+        <label className="settings-field">
+          <span>检索数量 top-k</span>
+          <input
+            type="number"
+            min={1}
+            max={20}
+            value={topK}
+            onChange={(event) => onTopKChange(Number(event.target.value))}
+          />
+          <small>数值越大，参考证据越多，但回答会更慢。建议普通问答 4-6，精读核对 7-10。</small>
+        </label>
+
+        <div className="settings-warning">
+          更换 embedding 模型后，已有文档最好重新索引，否则“问题向量”和“文档向量”可能来自不同模型，检索质量会不稳定。
+        </div>
+
+        <div className="settings-actions">
+          <button className="secondary-button" type="button" onClick={onReset} disabled={!catalog}>
+            恢复默认
+          </button>
+          <button className="primary-button" type="button" onClick={onClose}>
+            完成
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

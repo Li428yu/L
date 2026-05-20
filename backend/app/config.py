@@ -35,6 +35,12 @@ class Settings:
     data_dir: Path = Path(os.getenv("DATA_DIR", "data"))
     api_key: str | None = os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
     api_base_url: str | None = os.getenv("API_BASE_URL")
+    embedding_api_key: str | None = (
+        os.getenv("EMBEDDING_API_KEY") or os.getenv("ARK_API_KEY") or api_key
+    )
+    embedding_api_base_url: str | None = (
+        os.getenv("EMBEDDING_API_BASE_URL") or os.getenv("ARK_API_BASE_URL") or api_base_url
+    )
     default_chat_model: str = os.getenv("LLM_MODEL", "gpt-4.1-mini")
     default_embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
     default_top_k: int = int(os.getenv("DEFAULT_TOP_K", "5"))

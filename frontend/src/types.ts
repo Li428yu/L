@@ -159,11 +159,19 @@ export interface ModelPreset {
   id: string;
   label: string;
   description: string;
+  chat_model: string;
+  embedding_model: string;
+  top_k: number;
 }
 
 export interface ModelCatalog {
   presets: ModelPreset[];
   default_preset: string;
+  chat_model_options: string[];
+  embedding_model_options: string[];
+  default_chat_model: string;
+  default_embedding_model: string;
+  default_top_k: number;
 }
 
 export interface ChatMessage {

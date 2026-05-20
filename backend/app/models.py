@@ -155,11 +155,19 @@ class ModelPreset(BaseModel):
     id: str
     label: str
     description: str
+    chat_model: str
+    embedding_model: str
+    top_k: int
 
 
 class ModelCatalog(BaseModel):
     presets: list[ModelPreset]
     default_preset: str
+    chat_model_options: list[str] = Field(default_factory=list)
+    embedding_model_options: list[str] = Field(default_factory=list)
+    default_chat_model: str
+    default_embedding_model: str
+    default_top_k: int
 
 
 class ChunkPreview(BaseModel):

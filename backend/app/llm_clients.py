@@ -36,10 +36,10 @@ class ModelClients:
         )
 
     def embeddings(self, model: str | None = None) -> OpenAIEmbeddings:
-        self._require_api_key()
+        self._require_embedding_api_key()
         return OpenAIEmbeddings(
-            api_key=self.settings.api_key,
-            base_url=self.settings.api_base_url,
+            api_key=self.settings.embedding_api_key,
+            base_url=self.settings.embedding_api_base_url,
             model=model or self.settings.default_embedding_model,
             timeout=self.settings.model_timeout_seconds,
             max_retries=self.settings.model_max_retries,
@@ -126,6 +126,10 @@ class ModelClients:
         if not self.settings.api_key:
             raise RuntimeError("缺少 API_KEY 或 OPENAI_API_KEY，无法调用模型服务。")
 
+    def _require_embedding_api_key(self) -> None:
+        if not self.settings.embedding_api_key:
+            raise RuntimeError("缺少 EMBEDDING_API_KEY 或 API_KEY，无法调用 embedding 服务。")
+
     def _should_try_multimodal_embeddings(
         self,
         exc: Exception,
@@ -146,10 +150,10 @@ class ModelClients:
         texts: list[str],
         model: str,
     ) -> list[list[float]]:
-        if not self.settings.api_key or not self.settings.api_base_url:
+        if not self.settings.embedding_api_key or not self.settings.embedding_api_base_url:
             raise RuntimeError("缺少模型服务配置，无法调用多模态 embedding。")
 
-        endpoint = f"{self.settings.api_base_url.rstrip('/')}/embeddings/multimodal"
+        endpoint = f"{self.settings.embedding_api_base_url.rstrip('/')}/embeddings/multimodal"
         vectors: list[list[float]] = []
         with httpx.Client(timeout=self.settings.model_timeout_seconds) as client:
             for text in texts:
@@ -157,7 +161,7 @@ class ModelClients:
                     endpoint,
                     headers={
                         "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self.settings.api_key}",
+                        "Authorization": f"Bearer {self.settings.embedding_api_key}",
                     },
                     json={
                         "model": model,

@@ -71,6 +71,9 @@ export function askPaper(payload: {
   conversation_id?: string | null;
   document_ids: string[];
   model_preset: string;
+  chat_model?: string;
+  embedding_model?: string;
+  top_k?: number;
 }): Promise<AskResponse> {
   return request<AskResponse>("/api/chat", {
     method: "POST",
@@ -85,6 +88,9 @@ export async function askPaperStream(
     conversation_id?: string | null;
     document_ids: string[];
     model_preset: string;
+    chat_model?: string;
+    embedding_model?: string;
+    top_k?: number;
   },
   handlers: {
     onChunk: (chunk: string) => void;

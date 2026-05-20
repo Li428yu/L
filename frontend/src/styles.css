@@ -186,6 +186,120 @@ button {
   background: #fed7aa;
 }
 
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(31, 42, 36, 0.28);
+  backdrop-filter: blur(7px);
+}
+
+.settings-panel {
+  width: min(560px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid rgba(223, 229, 221, 0.9);
+  border-radius: 28px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(47, 125, 99, 0.14), transparent 34%),
+    #fffdf8;
+  box-shadow: 0 24px 70px rgba(31, 42, 36, 0.28);
+}
+
+.settings-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.settings-head span {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.settings-head h2 {
+  margin: 10px 0 6px;
+  font-size: 24px;
+}
+
+.settings-head p,
+.settings-field small {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.settings-close {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  background: #f3f5f0;
+  color: var(--muted);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.settings-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 13px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.settings-field > span {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.settings-field input {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 10px 12px;
+  color: var(--ink);
+}
+
+.settings-warning {
+  margin-top: 14px;
+  border-radius: 16px;
+  padding: 12px 13px;
+  background: #fff6dd;
+  color: #7a5519;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.primary-button {
+  border-radius: 999px;
+  padding: 10px 15px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+}
+
 .chat-column {
   display: flex;
   flex-direction: column;
@@ -207,6 +321,37 @@ button {
 
 .top-bar p {
   margin: 0;
+}
+
+.top-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.settings-button {
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 10px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #1f2a24;
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 10px 24px rgba(31, 42, 36, 0.14);
+}
+
+.settings-button svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+
+.settings-button:hover,
+.settings-button:focus-visible {
+  background: var(--accent);
+  outline: none;
 }
 
 .mode-picker {
@@ -644,6 +789,28 @@ mark {
   font-weight: 800;
 }
 
+.source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.preview-source {
+  border-radius: 999px;
+  padding: 9px 13px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.pdf-preview-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .pdf-frame {
   width: 100%;
   height: 460px;
@@ -1003,6 +1170,19 @@ mark {
   .top-bar,
   .composer {
     grid-template-columns: 1fr;
+  }
+
+  .top-bar {
+    flex-direction: column;
+  }
+
+  .settings-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .settings-backdrop {
+    padding: 12px;
   }
 
   .composer-row {
