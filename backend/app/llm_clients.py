@@ -57,6 +57,17 @@ class ModelClients:
             ) from exc
         return str(response.content).strip()
 
+    def chat_text_stream(self, messages: list[BaseMessage], model: str | None = None):
+        try:
+            for chunk in self.chat(model).stream(messages):
+                text = self._message_content_to_text(getattr(chunk, "content", ""))
+                if text:
+                    yield text
+        except Exception as exc:
+            raise RuntimeError(
+                "对话模型流式响应失败或响应太慢。"
+            ) from exc
+
     def embed_documents(self, texts: list[str], model: str | None = None) -> list[list[float]]:
         return self.embed_documents_with_info(texts, model=model).vectors
 
@@ -198,6 +209,19 @@ class ModelClients:
                 return item["dense"]
 
         raise RuntimeError("多模态 embedding 接口没有返回可用向量。")
+
+    def _message_content_to_text(self, content) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            return "".join(parts)
+        return str(content) if content else ""
 
     def _local_embedding(self, text: str, dimensions: int = 384) -> list[float]:
         vector = [0.0] * dimensions

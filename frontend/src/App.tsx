@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, MouseEvent } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import {
   askPaperStream,
   deleteConversation,
@@ -186,10 +186,16 @@ function App() {
         const storedSettings = readStoredModelSettings();
         const preset = catalog.presets.find((item) => item.id === storedSettings.modelPreset) ||
           catalog.presets.find((item) => item.id === catalog.default_preset);
+        const nextChatModel = catalog.chat_model_options.includes(storedSettings.chatModel || "")
+          ? storedSettings.chatModel || ""
+          : preset?.chat_model || catalog.default_chat_model;
+        const nextEmbeddingModel = catalog.embedding_model_options.includes(storedSettings.embeddingModel || "")
+          ? storedSettings.embeddingModel || ""
+          : preset?.embedding_model || catalog.default_embedding_model;
         setModels(catalog);
         setModelPreset(preset?.id || catalog.default_preset);
-        setChatModel(storedSettings.chatModel || preset?.chat_model || catalog.default_chat_model);
-        setEmbeddingModel(storedSettings.embeddingModel || preset?.embedding_model || catalog.default_embedding_model);
+        setChatModel(nextChatModel);
+        setEmbeddingModel(nextEmbeddingModel);
         setTopK(clampTopK(storedSettings.topK ?? preset?.top_k ?? catalog.default_top_k));
       })
       .catch((error: Error) => setNotice(toFriendlyError(error.message)));
@@ -629,14 +635,13 @@ function App() {
   }
 
   const activePreset = models?.presets.find((item) => item.id === modelPreset);
-  const chatModelOptions = uniqueNonEmpty([chatModel, ...(models?.chat_model_options || [])]);
-  const embeddingModelOptions = uniqueNonEmpty([embeddingModel, ...(models?.embedding_model_options || [])]);
+  const chatModelOptions = uniqueNonEmpty(models?.chat_model_options || [chatModel]);
+  const embeddingModelOptions = uniqueNonEmpty(models?.embedding_model_options || [embeddingModel]);
   const latestAssistantMessage = [...activeConversation.messages]
     .reverse()
     .find((message) => message.role === "assistant");
   const latestUserQuestion =
     [...activeConversation.messages].reverse().find((message) => message.role === "user")?.content || "";
-  const latestEvidence = latestAssistantMessage?.evidence || [];
   const latestRuntime = latestAssistantMessage?.runtime || [];
   const latestTrace = latestAssistantMessage?.rag_trace || activeConversation.trace;
   const menuConversation = conversationMenu
@@ -716,20 +721,6 @@ function App() {
           <div>
             <h1>和文档对话</h1>
             <p>上传 PDF 或 DOCX，然后像聊天一样提问。我会在右侧给出原文证据。</p>
-          </div>
-          <div className="top-actions">
-            <button
-              className="settings-button"
-              type="button"
-              aria-label="打开模型和检索设置"
-              title="模型和检索设置"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M19.4 13.5c.1-.5.1-1 .1-1.5s0-1-.1-1.5l2-1.5-2-3.5-2.4 1a7.3 7.3 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.3 7.3 0 0 0 7 6.5l-2.4-1-2 3.5 2 1.5c-.1.5-.1 1-.1 1.5s0 1 .1 1.5l-2 1.5 2 3.5 2.4-1a7.3 7.3 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.3 7.3 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z" />
-              </svg>
-              设置
-            </button>
           </div>
         </header>
 
@@ -878,7 +869,6 @@ function App() {
         ) : (
           <TeachingPanel
             documents={documents}
-            latestEvidence={latestEvidence}
             runtime={latestRuntime}
             trace={latestTrace}
             latestQuestion={latestUserQuestion}
@@ -1112,6 +1102,13 @@ function retrievalStrategyLabel(value?: string) {
     research_limitation: "文章研究局限检索",
     document_overview: "整篇文档重点检索",
     vector_similarity: "向量相似度检索",
+    hybrid_soft: "软意图混合检索",
+    hybrid_reference: "参考文献混合检索",
+    hybrid_field_lookup: "字段混合检索",
+    hybrid_comparison: "对比混合检索",
+    hybrid_judgment: "判断类混合检索",
+    hybrid_limitation: "局限类混合检索",
+    hybrid_overview: "全文概括混合检索",
     no_retrieval: "不检索文档"
   };
   return value ? labels[value] || value : "待运行";
@@ -1121,6 +1118,7 @@ function answerStrategyLabel(value?: string) {
   const labels: Record<string, string> = {
     local_compound_answer: "按用户顺序逐项回答复合任务",
     local_reference_answer: "本地规则整理参考文献",
+    local_field_lookup_answer: "本地规则提取指定字段",
     local_structured_review_answer: "本地规则生成结构化阅读报告",
     local_title_alignment_answer: "本地规则判断题目匹配",
     local_reliability_answer: "本地规则判断可靠性",
@@ -1129,6 +1127,7 @@ function answerStrategyLabel(value?: string) {
     local_document_answer: "本地规则概括文档",
     missing_evidence_refusal: "证据不足，拒绝硬答",
     model_answer: "模型基于证据生成",
+    model_unavailable: "模型不可用，未本地兜底",
     local_fallback_answer: "模型失败后本地降级回答"
   };
   return value ? labels[value] || value : "待生成";
@@ -1160,35 +1159,14 @@ function evidenceQualityLabel(value?: string) {
   return value ? labels[value] || value : "待判断";
 }
 
-function evidenceVerdictLabel(value?: string) {
-  const labels: Record<string, string> = {
-    direct: "直接支撑",
-    supporting: "辅助支撑",
-    background: "背景信息",
-    reject: "已拒绝"
-  };
-  return value ? labels[value] || value : "待裁判";
-}
-
-function verificationStatusLabel(value?: string) {
-  const labels: Record<string, string> = {
-    pass: "通过",
-    warn: "需注意",
-    fail: "未通过"
-  };
-  return value ? labels[value] || value : "待验证";
-}
-
 function TeachingPanel({
   documents,
-  latestEvidence,
   runtime,
   trace,
   latestQuestion,
   memoryUsed
 }: {
   documents: DocumentInfo[];
-  latestEvidence: EvidenceItem[];
   runtime: RuntimeStep[];
   trace: RagTrace | null;
   latestQuestion: string;
@@ -1197,9 +1175,6 @@ function TeachingPanel({
   const readyDocumentCount = documents.filter((document) => document.status === "ready").length;
   const totalChunks = documents.reduce((sum, document) => sum + (document.chunk_count || 0), 0);
   const filteredDocumentCount = trace?.filter_document_ids?.length || 0;
-  const retrievalDebugByChunk = new Map(
-    (trace?.retrieval_debug || []).map((item) => [item.chunk_id, item])
-  );
 
   return (
     <section className="teaching-card">
@@ -1268,45 +1243,6 @@ function TeachingPanel({
       </details>
 
       <details open className="teaching-section">
-        <summary>多 Agent 裁判与交叉验证</summary>
-        <p>这里展示证据裁判 Agent 和交叉验证 Agent 对本轮回答的核对结果。</p>
-        <div className="diagnostic-grid">
-          <div>
-            <span>验证状态</span>
-            <strong>{verificationStatusLabel(trace?.verification?.status)}</strong>
-          </div>
-          <div>
-            <span>回答引用</span>
-            <strong>{trace?.verification?.citation_count ?? "待验证"}</strong>
-          </div>
-          <div>
-            <span>缺失引用</span>
-            <strong>{trace?.verification?.missing_citations?.length ?? "待验证"}</strong>
-          </div>
-          <div>
-            <span>弱支撑引用</span>
-            <strong>{trace?.verification?.weak_citations?.length ?? "待验证"}</strong>
-          </div>
-        </div>
-        {trace?.verification?.summary ? <p>{trace.verification.summary}</p> : null}
-        <div className="evidence-debug-list compact">
-          {trace?.evidence_judgments?.length ? (
-            trace.evidence_judgments.slice(0, 8).map((item) => (
-              <article key={`${item.chunk_id}-${item.verdict}`}>
-                <strong>
-                  {item.citation_id} · {evidenceVerdictLabel(item.verdict)}
-                </strong>
-                <span>confidence：{formatPercent(item.confidence)}</span>
-                <small>{item.reason}</small>
-              </article>
-            ))
-          ) : (
-            <p>完成一次提问后，这里会显示证据裁判结果。</p>
-          )}
-        </div>
-      </details>
-
-      <details open className="teaching-section">
         <summary>RAG 检索详情</summary>
         <p>这里保留开发者需要的 top-k、score、向量库记录数和 chunk 信息。</p>
         <div className="teaching-metrics">
@@ -1340,40 +1276,30 @@ function TeachingPanel({
           </div>
         </div>
         <div className="evidence-debug-list compact">
-          {latestEvidence.length ? (
-            latestEvidence.slice(0, 8).map((item) => {
-              const debug = retrievalDebugByChunk.get(item.chunk_id);
-              return (
-                <article key={item.chunk_id}>
-                  <strong>
-                    {evidenceLabel(item)} · {item.paper_name}
-                  </strong>
-                  <span>score：{formatScore(item.score)}</span>
-                  <span>page：{item.page}</span>
-                  <span>chunk：{item.chunk_id}</span>
-                  <span>section：{item.section || "Unknown"}</span>
-                  {debug ? (
-                    <>
-                      <small className="hit-reason">命中原因：{debug.reason}</small>
-                      <div className="debug-tags">
-                        <span>{debug.selected_by}</span>
-                        <span>{debug.used_in_answer ? "进入回答" : "未直接引用"}</span>
-                        <span>{debug.used_in_prompt ? "进入 prompt" : "未进 prompt"}</span>
-                      </div>
-                      {debug.matched_keywords.length > 0 && (
-                        <small>命中关键词：{debug.matched_keywords.join("、")}</small>
-                      )}
-                      <details className="debug-evidence-details">
-                        <summary>查看调试文本</summary>
-                        <p>{maskSensitiveText(debug.quote || item.quote || item.text)}</p>
-                      </details>
-                    </>
-                  ) : (
-                    <small>{maskSensitiveText(item.quote || item.text).slice(0, 120)}</small>
-                  )}
-                </article>
-              );
-            })
+          {trace?.retrieval_debug?.length ? (
+            trace.retrieval_debug.slice(0, 8).map((item) => (
+              <article key={item.chunk_id}>
+                <strong>
+                  {item.citation_id} · chunk {item.chunk_id}
+                </strong>
+                <span>score：{formatScore(item.score)}</span>
+                <span>page：{item.page}</span>
+                <span>section：{item.section || "Unknown"}</span>
+                <small className="hit-reason">命中原因：{item.reason}</small>
+                <div className="debug-tags">
+                  <span>{item.selected_by}</span>
+                  <span>{item.used_in_answer ? "进入回答" : "未直接引用"}</span>
+                  <span>{item.used_in_prompt ? "进入 prompt" : "未进 prompt"}</span>
+                </div>
+                {item.matched_keywords.length > 0 && (
+                  <small>命中关键词：{item.matched_keywords.join("、")}</small>
+                )}
+                <details className="debug-evidence-details">
+                  <summary>查看调试文本</summary>
+                  <p>{maskSensitiveText(item.quote)}</p>
+                </details>
+              </article>
+            ))
           ) : (
             <p>完成一次提问后，这里会显示本轮检索到的证据和 score。</p>
           )}
@@ -1456,21 +1382,135 @@ function renderAnswerWithCitations(
   evidence: EvidenceItem[],
   onPick: (item: EvidenceItem) => void
 ) {
-  const parts = answer.split(/(\[E\d+\])/g);
-  return parts.map((part, index) => {
-    const match = part.match(/^\[E(\d+)\]$/);
-    if (!match) {
-      return <span key={`${part}-${index}`}>{part}</span>;
+  const normalized = normalizeAnswerMarkdown(answer);
+  const blocks = parseMarkdownBlocks(normalized);
+  return (
+    <div className="answer-markdown">
+      {blocks.map((block, index) => renderMarkdownBlock(block, index, evidence, onPick))}
+    </div>
+  );
+}
+
+type MarkdownBlock =
+  | { type: "heading"; level: 2 | 3; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "list"; ordered: boolean; items: string[] };
+
+function normalizeAnswerMarkdown(answer: string): string {
+  return answer
+    .replace(/\r\n/g, "\n")
+    .replace(/\[(?:Introduction|Conclusion|Abstract|Methods?|Results?|Discussion|Unknown)依据\]/gi, "")
+    .replace(/(?:Introduction|Conclusion|Abstract|Methods?|Results?|Discussion|Unknown)依据/gi, "")
+    .replace(/([^\n])\n(?=(?:[-*]\s+|\d+[.、]\s+|#{1,3}\s+))/g, "$1\n\n")
+    .trim();
+}
+
+function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
+  const lines = markdown.split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let paragraph: string[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+
+  function flushParagraph() {
+    const text = paragraph.join(" ").replace(/\s+/g, " ").trim();
+    if (text) {
+      blocks.push({ type: "paragraph", text });
     }
-    const item = evidence.find((candidate) => candidate.citation_id === `E${match[1]}`);
-    if (!item) {
-      return <span key={`${part}-${index}`}>{part}</span>;
+    paragraph = [];
+  }
+
+  function flushList() {
+    if (list?.items.length) {
+      blocks.push({ type: "list", ordered: list.ordered, items: list.items });
     }
+    list = null;
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", level: heading[1].length === 1 ? 2 : 3, text: heading[2].trim() });
+      continue;
+    }
+
+    const unorderedItem = line.match(/^[-*]\s+(.+)$/);
+    const orderedItem = line.match(/^\d+[.、]\s+(.+)$/);
+    if (unorderedItem || orderedItem) {
+      flushParagraph();
+      const ordered = Boolean(orderedItem);
+      if (!list || list.ordered !== ordered) {
+        flushList();
+        list = { ordered, items: [] };
+      }
+      list.items.push((unorderedItem?.[1] || orderedItem?.[1] || "").trim());
+      continue;
+    }
+
+    flushList();
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+
+function renderMarkdownBlock(
+  block: MarkdownBlock,
+  index: number,
+  evidence: EvidenceItem[],
+  onPick: (item: EvidenceItem) => void
+) {
+  if (block.type === "heading") {
+    const HeadingTag = block.level === 2 ? "h3" : "h4";
+    return <HeadingTag key={`heading-${index}`}>{renderInlineMarkdown(block.text, evidence, onPick)}</HeadingTag>;
+  }
+  if (block.type === "list") {
+    const ListTag = block.ordered ? "ol" : "ul";
     return (
-      <button className="inline-citation" key={`${part}-${index}`} onClick={() => onPick(item)}>
-        {evidenceLabel(item)}
-      </button>
+      <ListTag key={`list-${index}`}>
+        {block.items.map((item, itemIndex) => (
+          <li key={`item-${index}-${itemIndex}`}>{renderInlineMarkdown(item, evidence, onPick)}</li>
+        ))}
+      </ListTag>
     );
+  }
+  return <p key={`paragraph-${index}`}>{renderInlineMarkdown(block.text, evidence, onPick)}</p>;
+}
+
+function renderInlineMarkdown(
+  text: string,
+  evidence: EvidenceItem[],
+  onPick: (item: EvidenceItem) => void
+): ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|\[E\d+\])/g).filter(Boolean);
+  return parts.map((part, index) => {
+    const citation = part.match(/^\[E(\d+)\]$/);
+    if (citation) {
+      const item = evidence.find((candidate) => candidate.citation_id === `E${citation[1]}`);
+      if (!item) {
+        return <Fragment key={`${part}-${index}`}>{part}</Fragment>;
+      }
+      return (
+        <button className="inline-citation" key={`${part}-${index}`} onClick={() => onPick(item)}>
+          {evidenceLabel(item)}
+        </button>
+      );
+    }
+    const bold = part.match(/^\*\*(.+)\*\*$/);
+    if (bold) {
+      return <strong key={`${part}-${index}`}>{renderInlineMarkdown(bold[1], evidence, onPick)}</strong>;
+    }
+    return <Fragment key={`${part}-${index}`}>{part}</Fragment>;
   });
 }
 
@@ -1480,14 +1520,8 @@ function renderEvidenceActions(message: ChatMessage, onPick: (item: EvidenceItem
     return null;
   }
   const inlineCitationIds = citationIdsFromAnswer(message.content);
-  const inlineCitedChunkIds = new Set(
-    inlineCitationIds
-      .map((citationId) => evidence.find((item) => item.citation_id === citationId)?.chunk_id)
-      .filter((chunkId): chunkId is string => Boolean(chunkId))
-  );
   const primaryEvidence = inlineCitationIds.length ? [] : primaryEvidenceForAnswer(message.content, evidence);
-  const hiddenIds = new Set([...inlineCitedChunkIds, ...primaryEvidence.map((item) => item.chunk_id)]);
-  const moreEvidence = evidence.filter((item) => !hiddenIds.has(item.chunk_id));
+  const moreEvidence: EvidenceItem[] = [];
 
   if (!primaryEvidence.length && !moreEvidence.length) {
     return null;
@@ -1522,27 +1556,12 @@ function citationIdsFromAnswer(answer: string): string[] {
 
 function primaryEvidenceForAnswer(answer: string, evidence: EvidenceItem[]): EvidenceItem[] {
   const citedIds = citationIdsFromAnswer(answer);
-  const citedEvidence = citedIds
+  return citedIds
     .map((citationId) => evidence.find((item) => item.citation_id === citationId))
     .filter((item): item is EvidenceItem => Boolean(item));
-  const primary = citedEvidence.length ? citedEvidence : evidence;
-  return primary.slice(0, 2);
 }
 
 function evidenceLabel(item: EvidenceItem): string {
-  const name = item.paper_name || "";
-  if (name.includes("一") || name.includes("1")) {
-    return "实验一依据";
-  }
-  if (name.includes("二") || name.includes("2")) {
-    return "实验二依据";
-  }
-  if (item.section === "References") {
-    return "参考文献依据";
-  }
-  if (item.section && item.section !== "Unknown") {
-    return `${item.section}依据`;
-  }
   return `证据 ${item.citation_id.replace("E", "")}`;
 }
 

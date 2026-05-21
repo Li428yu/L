@@ -323,37 +323,6 @@ button {
   margin: 0;
 }
 
-.top-actions {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.settings-button {
-  min-height: 44px;
-  border-radius: 999px;
-  padding: 10px 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: #1f2a24;
-  color: #fff;
-  font-weight: 800;
-  box-shadow: 0 10px 24px rgba(31, 42, 36, 0.14);
-}
-
-.settings-button svg {
-  width: 17px;
-  height: 17px;
-  fill: currentColor;
-}
-
-.settings-button:hover,
-.settings-button:focus-visible {
-  background: var(--accent);
-  outline: none;
-}
-
 .mode-picker {
   min-width: 172px;
   display: grid;
@@ -453,6 +422,7 @@ details small {
   grid-row: 1;
   background: var(--accent);
   color: white;
+  white-space: pre-wrap;
 }
 
 .avatar {
@@ -471,14 +441,55 @@ details small {
   padding: 14px 16px;
   background: #fff;
   border: 1px solid var(--line);
-  line-height: 1.75;
-  white-space: pre-wrap;
+  line-height: 1.68;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .thinking {
   color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.answer-markdown {
+  display: grid;
+  gap: 10px;
+}
+
+.answer-markdown p,
+.answer-markdown ul,
+.answer-markdown ol,
+.answer-markdown h3,
+.answer-markdown h4 {
+  margin: 0;
+}
+
+.answer-markdown h3 {
+  font-size: 20px;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.answer-markdown h4 {
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.answer-markdown ul,
+.answer-markdown ol {
+  padding-left: 24px;
+  display: grid;
+  gap: 8px;
+}
+
+.answer-markdown li {
+  padding-left: 2px;
+}
+
+.answer-markdown strong {
+  font-weight: 800;
+  color: var(--ink);
 }
 
 .citation-row {
@@ -492,11 +503,16 @@ details small {
 .citation-row button,
 .inline-citation {
   border-radius: 999px;
-  padding: 4px 10px;
+  padding: 3px 10px;
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 800;
   vertical-align: baseline;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 3px;
+  line-height: 1.45;
 }
 
 .citation-more {
@@ -1174,11 +1190,6 @@ mark {
 
   .top-bar {
     flex-direction: column;
-  }
-
-  .settings-button {
-    width: 100%;
-    justify-content: center;
   }
 
   .settings-backdrop {

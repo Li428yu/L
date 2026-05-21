@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from contextlib import suppress
 from pathlib import Path
@@ -294,22 +293,14 @@ def chat(request: AskRequest) -> AskResponse:
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: AskRequest) -> StreamingResponse:
+def chat_stream(request: AskRequest) -> StreamingResponse:
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空。")
 
-    async def event_stream():
+    def event_stream():
         try:
-            yield _stream_event("status", "正在理解你的问题...")
-            await asyncio.sleep(0.05)
-            yield _stream_event("status", "正在从当前文档里查找证据...")
-            response = await asyncio.to_thread(agent.ask, request)
-            yield _stream_event("status", "正在组织回答...")
-            await asyncio.sleep(0.05)
-            for chunk in _answer_chunks(response.answer):
-                yield _stream_event("chunk", chunk)
-                await asyncio.sleep(0.018)
-            yield _stream_event("final", response.model_dump(mode="json"))
+            for event in agent.stream(request):
+                yield _stream_event(event.type, event.payload)
         except RuntimeError as exc:
             yield _stream_event("error", str(exc))
         except Exception:
@@ -323,20 +314,9 @@ async def chat_stream(request: AskRequest) -> StreamingResponse:
 
 
 def _stream_event(event_type: str, payload: object) -> str:
+    if hasattr(payload, "model_dump"):
+        payload = payload.model_dump(mode="json")
     return json.dumps({"type": event_type, "payload": payload}, ensure_ascii=False) + "\n"
-
-
-def _answer_chunks(answer: str, size: int = 10) -> list[str]:
-    chunks: list[str] = []
-    buffer = ""
-    for char in answer:
-        buffer += char
-        if len(buffer) >= size or char in "。！？\n":
-            chunks.append(buffer)
-            buffer = ""
-    if buffer:
-        chunks.append(buffer)
-    return chunks
 
 
 @app.post("/api/evaluation/run", response_model=EvaluationRun)

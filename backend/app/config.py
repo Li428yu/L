@@ -18,6 +18,27 @@ def _csv_env(name: str, fallback: list[str]) -> list[str]:
     return values or fallback
 
 
+def _bool_env(name: str, fallback: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return fallback
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _chat_api_key() -> str | None:
+    explicit_chat_provider = os.getenv("CHAT_API_BASE_URL") or os.getenv("DEEPSEEK_API_BASE_URL")
+    explicit_key = os.getenv("CHAT_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+    if explicit_key:
+        return explicit_key
+    if explicit_chat_provider:
+        return None
+    return os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
+
+
+def _chat_api_base_url() -> str | None:
+    return os.getenv("CHAT_API_BASE_URL") or os.getenv("DEEPSEEK_API_BASE_URL") or os.getenv("API_BASE_URL")
+
+
 @dataclass(frozen=True)
 class ResolvedModelPreset:
     id: str
@@ -33,19 +54,25 @@ class Settings:
     app_name: str = "Paper Reading Assistant"
     project_root: Path = Path(__file__).resolve().parents[2]
     data_dir: Path = Path(os.getenv("DATA_DIR", "data"))
-    api_key: str | None = os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
-    api_base_url: str | None = os.getenv("API_BASE_URL")
+    api_key: str | None = _chat_api_key()
+    api_base_url: str | None = _chat_api_base_url()
     embedding_api_key: str | None = (
-        os.getenv("EMBEDDING_API_KEY") or os.getenv("ARK_API_KEY") or api_key
+        os.getenv("EMBEDDING_API_KEY")
+        or os.getenv("ARK_API_KEY")
+        or os.getenv("API_KEY")
+        or os.getenv("OPENAI_API_KEY")
     )
     embedding_api_base_url: str | None = (
-        os.getenv("EMBEDDING_API_BASE_URL") or os.getenv("ARK_API_BASE_URL") or api_base_url
+        os.getenv("EMBEDDING_API_BASE_URL")
+        or os.getenv("ARK_API_BASE_URL")
+        or os.getenv("API_BASE_URL")
     )
     default_chat_model: str = os.getenv("LLM_MODEL", "gpt-4.1-mini")
     default_embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
     default_top_k: int = int(os.getenv("DEFAULT_TOP_K", "5"))
-    model_timeout_seconds: float = float(os.getenv("MODEL_TIMEOUT_SECONDS", "8"))
-    model_max_retries: int = int(os.getenv("MODEL_MAX_RETRIES", "0"))
+    model_timeout_seconds: float = float(os.getenv("MODEL_TIMEOUT_SECONDS", "20"))
+    model_max_retries: int = int(os.getenv("MODEL_MAX_RETRIES", "1"))
+    force_model_answer: bool = _bool_env("FORCE_MODEL_ANSWER", False)
 
     @property
     def resolved_data_dir(self) -> Path:

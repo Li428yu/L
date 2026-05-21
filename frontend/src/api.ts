@@ -133,7 +133,7 @@ export async function askPaperStream(
       const event = JSON.parse(line) as { type: string; payload: unknown };
       if (event.type === "status" && typeof event.payload === "string") {
         handlers.onStatus?.(event.payload);
-      } else if (event.type === "chunk" && typeof event.payload === "string") {
+      } else if ((event.type === "token" || event.type === "chunk") && typeof event.payload === "string") {
         handlers.onChunk(event.payload);
       } else if (event.type === "final") {
         finalPayload = event.payload as AskResponse;
