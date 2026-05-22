@@ -17,6 +17,10 @@ class ChunkStrategy(BaseModel):
     page_count: int
     paragraph_count: int
     char_count: int
+    token_count: int = 0
+    size_unit: str = "characters"
+    parent_chunk_size: int = 0
+    parent_overlap: int = 0
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -58,14 +62,25 @@ class EvidenceItem(BaseModel):
     document_id: str
     paper_name: str
     page: int
+    page_start: int | None = None
+    page_end: int | None = None
     section: str | None = None
     source: str
     file_hash: str
     score: float
+    vector_score: float | None = None
+    sparse_score: float | None = None
+    rule_score: float | None = None
+    rrf_score: float | None = None
+    final_score: float | None = None
+    score_source: str = ""
     text: str
     quote: str
     char_start: int | None = None
     char_end: int | None = None
+    token_count: int | None = None
+    chunk_type: str = "text"
+    parent_id: str | None = None
 
 
 class RuntimeStep(BaseModel):
@@ -78,8 +93,16 @@ class RetrievalDebugItem(BaseModel):
     citation_id: str
     chunk_id: str
     page: int
+    page_start: int | None = None
+    page_end: int | None = None
     section: str | None = None
     score: float
+    vector_score: float | None = None
+    sparse_score: float | None = None
+    rule_score: float | None = None
+    rrf_score: float | None = None
+    final_score: float | None = None
+    score_source: str = ""
     retrieval_strategy: str
     selected_by: str
     matched_keywords: list[str] = Field(default_factory=list)
@@ -99,6 +122,8 @@ class RagTrace(BaseModel):
     final_prompt_evidence: list[str]
     intent: str = ""
     retrieval_strategy: str = ""
+    retrieval_pipeline: str = ""
+    ranking_method: str = ""
     answer_strategy: str = ""
     fallback_used: bool = False
     evidence_quality: str = ""
@@ -173,7 +198,11 @@ class ModelCatalog(BaseModel):
 class ChunkPreview(BaseModel):
     chunk_id: str
     page: int
+    page_start: int | None = None
+    page_end: int | None = None
     section: str | None = None
+    chunk_type: str = "text"
+    token_count: int | None = None
     text: str
 
 

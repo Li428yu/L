@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from backend.app.agent_parts.events import AgentEvent, final_event, status_event, token_event
@@ -90,56 +92,29 @@ class PaperAgentService(
             "runtime": [],
             "evidence": [],
             "final_prompt_evidence": [],
+            "retrieval_attempts": 0,
+            "retrieval_pipeline": "",
+            "ranking_method": "",
         }
 
-        yield status_event("正在读取记忆...")
-        state = self._load_memory(state)
-
-        yield status_event("正在理解你的问题...")
-        state = self._plan(state)
-
-        if self._route_after_planner(state) == "retrieve":
-            yield status_event("正在从当前文档里查找证据...")
-            state = self._retrieve(state)
-
-            yield status_event("正在判断证据是否支撑问题...")
-            state = self._judge_evidence(state)
-
-        yield status_event("正在组织回答...")
-        answer_plan = self._prepare_answer_plan(state)
-        answer_parts: list[str] = []
-
-        if answer_plan.mode == "model":
-            emitted_token = False
-            try:
-                for text in self._stream_model_answer_tokens(state, answer_plan):
-                    emitted_token = True
-                    answer_parts.append(text)
-                    yield token_event(text)
-            except RuntimeError as exc:
-                if emitted_token:
-                    raise RuntimeError("模型流式回答中断，本轮未保存半截回答。") from exc
-                answer_plan = self._model_failure_answer_plan(state, answer_plan, exc)
-                if answer_plan.local_answer:
-                    answer_parts.append(answer_plan.local_answer)
-                    yield token_event(answer_plan.local_answer)
-        else:
-            answer_parts.append(answer_plan.local_answer)
-            if answer_plan.local_answer:
-                yield token_event(answer_plan.local_answer)
-
-        answer = "".join(answer_parts)
-        state = self._finalize_answer(state, answer, answer_plan)
-
-        yield status_event("正在核对引用...")
-        state = self._verify_answer(state)
-        state = self._write_memory(state)
+        final_state = state
+        for mode, payload in self.graph.stream(state, stream_mode=["custom", "updates"]):
+            if mode == "custom":
+                event = self._agent_event_from_graph_payload(payload)
+                if event is not None:
+                    yield event
+                continue
+            if mode != "updates" or not isinstance(payload, dict):
+                continue
+            for node_update in payload.values():
+                if isinstance(node_update, dict):
+                    final_state = {**final_state, **node_update}
 
         response = self._build_response_from_state(
             request=request,
-            state=state,
+            state=final_state,
             model_profile=preset.label,
-            top_k=top_k,
+            top_k=int(final_state.get("top_k", top_k) or top_k),
         )
         yield final_event(response)
 
@@ -158,13 +133,14 @@ class PaperAgentService(
         final_prompt_evidence = state.get("final_prompt_evidence", [])
         evidence_judgments = state.get("evidence_judgments", [])
         verification = state.get("verification", {})
-        parsed_tasks = self._parse_compound_tasks(request.question)
-        compound_tasks = state.get("compound_tasks") or [task.task_type for task in parsed_tasks]
-        task_parse_reason = state.get("task_parse_reason") or self._task_parse_reason(parsed_tasks)
+        compound_tasks = state.get("compound_tasks") or []
+        task_parse_reason = state.get("task_parse_reason") or ""
         intent = state.get("intent") or self._classify_question_intent(request.question)
         retrieval_strategy = state.get("retrieval_strategy") or self._retrieval_strategy_for_question(
             request.question
         )
+        retrieval_pipeline = state.get("retrieval_pipeline", "")
+        ranking_method = state.get("ranking_method", "")
         answer_strategy = state.get("answer_strategy") or "model_answer"
         fallback_used = bool(state.get("fallback_used", False))
         evidence_quality = state.get("evidence_quality") or self._evidence_quality(
@@ -218,6 +194,8 @@ class PaperAgentService(
                 final_prompt_evidence=final_prompt_evidence,
                 intent=intent,
                 retrieval_strategy=retrieval_strategy,
+                retrieval_pipeline=retrieval_pipeline,
+                ranking_method=ranking_method,
                 answer_strategy=answer_strategy,
                 fallback_used=fallback_used,
                 evidence_quality=evidence_quality,
@@ -253,6 +231,7 @@ class PaperAgentService(
         builder.add_node("planner", self._plan)
         builder.add_node("retriever", self._retrieve)
         builder.add_node("evidence_judge", self._judge_evidence)
+        builder.add_node("retrieval_refiner", self._refine_retrieval)
         builder.add_node("answer", self._answer)
         builder.add_node("verifier", self._verify_answer)
         builder.add_node("memory_writer", self._write_memory)
@@ -264,13 +243,34 @@ class PaperAgentService(
             {"retrieve": "retriever", "answer": "answer"},
         )
         builder.add_edge("retriever", "evidence_judge")
-        builder.add_edge("evidence_judge", "answer")
-        builder.add_edge("answer", "verifier")
+        builder.add_conditional_edges(
+            "evidence_judge",
+            self._route_after_evidence_judge,
+            {"retry_retrieve": "retrieval_refiner", "answer": "answer"},
+        )
+        builder.add_edge("retrieval_refiner", "retriever")
+        builder.add_conditional_edges(
+            "answer",
+            self._route_after_answer,
+            {"verify": "verifier", "write_memory": "memory_writer"},
+        )
         builder.add_edge("verifier", "memory_writer")
         builder.add_edge("memory_writer", END)
         return builder.compile()
 
+    def _route_after_answer(self, state: PaperAgentState) -> str:
+        if not state.get("needs_retrieval"):
+            return "write_memory"
+        answer_strategy = str(state.get("answer_strategy") or "")
+        if answer_strategy in {"model_unavailable", "missing_evidence_refusal"}:
+            return "write_memory"
+        answer = state.get("answer", "")
+        if state.get("evidence") or self._citation_ids_from_answer(answer):
+            return "verify"
+        return "write_memory"
+
     def _load_memory(self, state: PaperAgentState) -> PaperAgentState:
+        self._emit_status("正在读取记忆...")
         facts = self.memory.build_memory_context(state["conversation_id"])
         recent_messages = self.store.get_recent_messages(state["conversation_id"], limit=10)
         return {
@@ -289,6 +289,7 @@ class PaperAgentService(
         }
 
     def _write_memory(self, state: PaperAgentState) -> PaperAgentState:
+        self._emit_status("正在更新记忆...")
         remembered = self.memory.remember_from_user_text(state["conversation_id"], state["question"])
         facts = self.memory.build_memory_context(state["conversation_id"])
         detail = (
@@ -318,3 +319,36 @@ class PaperAgentService(
                 if (document := self.store.get_document(document_id)) and document.status == "ready"
             ]
         return [document.id for document in self.store.list_documents() if document.status == "ready"]
+
+    def _emit_status(self, message: str) -> None:
+        self._emit_graph_event("status", message)
+
+    def _emit_token(self, text: str) -> None:
+        if text:
+            self._emit_graph_event("token", text)
+
+    def _emit_graph_event(self, event_type: str, payload: object) -> None:
+        try:
+            get_stream_writer()({"type": event_type, "payload": payload})
+        except Exception:
+            # The same node methods are still callable in unit tests or direct
+            # invocations outside a LangGraph stream, where no stream writer is
+            # installed.
+            return
+
+    def _agent_event_from_graph_payload(self, payload: Any) -> AgentEvent | None:
+        if isinstance(payload, AgentEvent):
+            return payload
+        if not isinstance(payload, dict):
+            return status_event(str(payload))
+        event_type = str(payload.get("type") or "")
+        event_payload = payload.get("payload", "")
+        if event_type == "status":
+            return status_event(str(event_payload))
+        if event_type in {"token", "chunk"}:
+            return token_event(str(event_payload))
+        if event_type == "error":
+            return AgentEvent(type="error", payload=str(event_payload))
+        if event_type == "final":
+            return final_event(event_payload)
+        return status_event(str(event_payload or payload))

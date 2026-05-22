@@ -10,7 +10,6 @@ from backend.app.agent_parts.state import (
     AnswerPlan,
     DocumentProfile,
     PaperAgentState,
-    ParsedTask,
     ReadingTaskContract,
 )
 from backend.app.models import EvidenceItem, RetrievalDebugItem, RuntimeStep
@@ -18,20 +17,27 @@ from backend.app.models import EvidenceItem, RetrievalDebugItem, RuntimeStep
 
 class AgentAnsweringMixin:
     def _answer(self, state: PaperAgentState) -> PaperAgentState:
+        self._emit_status("正在组织回答...")
         plan = self._prepare_answer_plan(state)
         if plan.mode in {"local", "unavailable"}:
+            self._emit_token(plan.local_answer)
             return self._finalize_answer(state, plan.local_answer, plan)
 
+        answer_parts: list[str] = []
+        emitted_token = False
         try:
-            answer = self.model_clients.chat_text(
-                [SystemMessage(content=plan.system_prompt), HumanMessage(content=plan.user_prompt)],
-                model=state["chat_model"],
-            )
-            answer = self._clean_model_answer(answer)
+            for text in self._stream_model_answer_tokens(state, plan):
+                emitted_token = True
+                answer_parts.append(text)
+                self._emit_token(text)
         except RuntimeError as exc:
+            if emitted_token:
+                raise RuntimeError("模型流式回答中断，本轮未保存半截回答。") from exc
             fallback_plan = self._model_failure_answer_plan(state, plan, exc)
+            self._emit_token(fallback_plan.local_answer)
             return self._finalize_answer(state, fallback_plan.local_answer, fallback_plan)
 
+        answer = "".join(answer_parts)
         return self._finalize_answer(state, answer, plan)
 
     def _prepare_answer_plan(self, state: PaperAgentState) -> AnswerPlan:
@@ -49,7 +55,7 @@ class AgentAnsweringMixin:
             evidence=compact_model_prompt_evidence,
         )
         final_prompt_evidence = [
-            f"[{item.citation_id}] {item.paper_name} p.{item.page} score={item.score:.3f}"
+            f"[{item.citation_id}] {item.paper_name} p.{self._evidence_page_label(item)} score={item.score:.3f}"
             for item in compact_model_prompt_evidence
         ]
         recent_history = self._format_recent_history(state.get("recent_messages", []))
@@ -87,6 +93,26 @@ class AgentAnsweringMixin:
                 final_prompt_evidence=final_prompt_evidence,
                 prompt_evidence=compact_model_prompt_evidence,
                 runtime_detail="这是字段提取类问题，已只保留用户询问的字段内容，避免作者、单位、日期等相邻信息混入。",
+            )
+
+        if not force_model_answer and state.get("needs_retrieval") and (
+            not state.get("evidence", [])
+            or self._should_decline_for_missing_direct_evidence(
+                state["question"],
+                state.get("evidence", []),
+            )
+        ):
+            answer = self._build_missing_direct_evidence_answer(
+                state["question"],
+                state.get("evidence", []),
+            )
+            return AnswerPlan(
+                mode="local",
+                local_answer=answer,
+                answer_strategy="missing_evidence_refusal",
+                final_prompt_evidence=final_prompt_evidence,
+                prompt_evidence=compact_model_prompt_evidence,
+                runtime_detail="检索和证据裁判后仍缺少直接证据，本轮停止硬答。",
             )
 
         system_prompt = (
@@ -180,7 +206,7 @@ class AgentAnsweringMixin:
         blocks = []
         for item in evidence:
             blocks.append(
-                f"[{item.citation_id}] {item.paper_name} | Page {item.page} | "
+                f"[{item.citation_id}] {item.paper_name} | Page {self._evidence_page_label(item)} | "
                 f"Section: {item.section or 'Unknown'} | Score: {item.score:.3f}\n"
                 f"{self._sanitize_evidence_text(item.text)}"
             )
@@ -261,7 +287,7 @@ class AgentAnsweringMixin:
             if not summary:
                 continue
             blocks.append(
-                f"[{item.citation_id}] {item.paper_name} | Page {item.page} | "
+                f"[{item.citation_id}] {item.paper_name} | Page {self._evidence_page_label(item)} | "
                 f"Section: {item.section or 'Unknown'} | Score: {item.score:.3f}\n"
                 f"{summary}"
             )
@@ -460,8 +486,6 @@ class AgentAnsweringMixin:
             return "我没有找到可用的原文片段，所以暂时不能可靠回答。你可以换个问法，或重新准备文档。"
         if self._looks_like_reference_question(question):
             return self._build_local_reference_answer(question, evidence, memory_facts)
-        if self._looks_like_reliability_question(question):
-            return self._build_local_reliability_answer(question, evidence, memory_facts)
 
         profile = self._profile_from_evidence(evidence)
         clean_text = " ".join(
@@ -916,9 +940,6 @@ class AgentAnsweringMixin:
             checker(question)
             for checker in [
                 self._looks_like_reference_question,
-                self._looks_like_structured_review_request,
-                self._looks_like_reliability_question,
-                self._looks_like_title_alignment_question,
                 self._looks_like_compare_question,
                 self._looks_like_document_wide_question,
             ]
@@ -970,393 +991,6 @@ class AgentAnsweringMixin:
             f"或者点右侧证据看看文档里实际出现了哪些内容。{citations}"
         )
 
-    def _section_number(self, index: int) -> str:
-        numbers = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
-        if 1 <= index <= len(numbers):
-            return numbers[index - 1]
-        return str(index)
-
-    def _compound_task_title(
-        self,
-        task: ParsedTask,
-        question: str,
-        memory_facts: dict[str, str],
-    ) -> str:
-        major = self._extract_major_from_context(question, memory_facts)
-        titles = {
-            "overview_summary": "总体概括文章内容",
-            "reference_list": "文章使用的参考文献",
-            "professional_takeaways": f"从{major}专业角度，你能收获什么" if major else "从专业角度，你能收获什么",
-            "reliability_judgment": "可靠性判断",
-            "method_analysis": "研究方法/实现方法分析",
-            "limitation_analysis": "局限与不足",
-            "conclusion_summary": "核心结论",
-            "comparison": "文档对比",
-        }
-        return titles.get(task.task_type, task.label)
-
-    def _build_local_compound_answer(
-        self,
-        question: str,
-        evidence: list[EvidenceItem],
-        memory_facts: dict[str, str] | None = None,
-        document_ids: list[str] | None = None,
-    ) -> str:
-        if not evidence:
-            return "我没有找到足够的原文证据，所以不能可靠地完成这个多步骤问题。请确认文档已经上传并完成索引。"
-
-        tasks = self._parse_compound_tasks(question)
-        if len(tasks) < 2:
-            return self._build_local_answer(question, evidence, memory_facts)
-
-        grouped = self._group_evidence_by_document(evidence)
-        resolved_document_ids = self._resolve_document_ids(document_ids)
-        profile_by_key: dict[str, DocumentProfile] = {}
-        for document_id in resolved_document_ids:
-            profile = self._build_document_profile(document_id)
-            profile_by_key[profile.document_id] = profile
-            profile_by_key[profile.name] = profile
-
-        all_context = " ".join(item.text for item in evidence)
-        audience_note = self._audience_note(memory_facts or {}, question, all_context).strip()
-        ordered_tasks = " → ".join(task.label for task in tasks)
-        parts = [f"我按你问题里的顺序来回答：{ordered_tasks}。"]
-        if len(grouped) > 1:
-            parts.append("你上传了多篇文档，我会在每个任务里把文档分开说，避免混在一起。")
-        if audience_note:
-            parts.append(audience_note)
-
-        for index, task in enumerate(tasks, start=1):
-            section_body = self._render_compound_task_section(
-                task=task,
-                question=question,
-                grouped=grouped,
-                profile_by_key=profile_by_key,
-                memory_facts=memory_facts or {},
-            )
-            parts.append(
-                f"{self._section_number(index)}、{self._compound_task_title(task, question, memory_facts or {})}\n\n"
-                f"{section_body}"
-            )
-
-        return "\n\n".join(part for part in parts if part.strip())
-
-    def _render_compound_task_section(
-        self,
-        *,
-        task: ParsedTask,
-        question: str,
-        grouped: dict[str, list[EvidenceItem]],
-        profile_by_key: dict[str, DocumentProfile],
-        memory_facts: dict[str, str],
-    ) -> str:
-        if task.task_type == "comparison":
-            all_evidence = [item for items in grouped.values() for item in items]
-            return self._build_local_compare_answer(question, all_evidence, memory_facts)
-
-        sections: list[str] = []
-        multi_document = len(grouped) > 1
-        for doc_index, (name, items) in enumerate(grouped.items(), start=1):
-            profile = (
-                profile_by_key.get(items[0].document_id)
-                or profile_by_key.get(name)
-                or self._profile_from_evidence(items)
-            )
-            text = self._sanitize_evidence_text(" ".join(item.text for item in items))
-            if task.task_type == "overview_summary":
-                content = self._render_compound_overview(profile, items, text)
-            elif task.task_type == "reference_list":
-                content = self._render_compound_references(name, items)
-            elif task.task_type == "professional_takeaways":
-                content = self._render_compound_takeaways(profile, items, text, question, memory_facts)
-            elif task.task_type == "reliability_judgment":
-                content = self._render_compound_reliability(profile, items, text)
-            elif task.task_type == "method_analysis":
-                content = self._render_compound_method(profile, items, text)
-            elif task.task_type == "limitation_analysis":
-                content = self._render_compound_limitations(profile, items, text, question)
-            elif task.task_type == "conclusion_summary":
-                content = self._render_compound_conclusion(profile, items, text)
-            else:
-                content = self._build_local_document_wide_answer(question, items, memory_facts)
-
-            if multi_document:
-                title = profile.title or name
-                sections.append(f"{doc_index}. 《{title}》\n{content}")
-            else:
-                sections.append(content)
-        return "\n\n".join(sections)
-
-    def _render_compound_overview(
-        self,
-        profile: DocumentProfile,
-        items: list[EvidenceItem],
-        text: str,
-    ) -> str:
-        citation = self._join_citations(
-            [
-                self._first_citation_with(items, ["摘要", "本文围绕", "研究主题", "实验名称", "实验目的"]),
-                self._first_citation_with(items, ["结论", "研究认为", "总体而言"], fallback=False),
-            ]
-        )
-        if profile.kind == "实验报告" or "实验名称" in text:
-            summary = self._summarize_document_for_compare(items)
-            return (
-                f"这份文档主要是《{summary['title']}》相关内容，重点在{summary['focus']}。"
-                f"它的实现/展开过程主要围绕{summary['implementation']}，对应要掌握的知识点是{summary['knowledge']}。{citation}"
-            )
-
-        topic = self._extract_topic_from_text(text) or profile.title
-        conclusion = (self._extract_conclusion_from_text(text) or profile.main_claim).rstrip("。；; ")
-        method_line = (
-            f"它主要采用{profile.method}来展开论证"
-            if profile.method and "没有清楚" not in profile.method
-            else "它更偏观点梳理和材料分析"
-        )
-        risk_line = (
-            "同时提醒学习依赖、信息准确性、数据隐私、算法偏差、学术诚信和责任边界等风险"
-            if any(keyword in text for keyword in ["学习依赖", "信息准确性", "数据隐私", "算法偏差", "学术诚信", "责任边界"])
-            else "同时需要继续核对方法、数据来源和结论边界"
-        )
-        return (
-            f"这篇文档主要讨论《{topic}》。可以抓住三点：\n\n"
-            f"1. 研究对象：它围绕“{topic}”展开，重点看这个主题中的问题、机制、场景和结果。\n"
-            f"2. 论证方式：{method_line}，所以它更像一篇框架分析型文本，而不是严格实证论文。\n"
-            f"3. 核心判断：{conclusion}；{risk_line}。\n\n"
-            f"这些概括来自文档开头、方法和结论相关证据。{citation}"
-        )
-
-    def _render_compound_references(self, name: str, items: list[EvidenceItem]) -> str:
-        text = "\n".join(item.text for item in items)
-        references = self._extract_references_from_text(text)
-        citations = self._join_citations([item.citation_id for item in items if self._reference_marker_count(item.text) > 0])
-        if not citations:
-            citations = self._join_citations([self._first_citation_with(items, ["参考文献", "References", "[1]"], fallback=False)])
-
-        if not references:
-            return (
-                f"我没有稳定解析出《{name}》的编号参考文献条目。"
-                f"如果右侧原文里能看到参考文献，建议点开对应证据人工核对；如果看不到，可能是文档没有参考文献区或解析没有抽到。{citations}"
-            )
-
-        visible_references = references[:12]
-        lines = [f"{number}. {content}" for number, content in visible_references]
-        more = f"\n\n其余 {len(references) - len(visible_references)} 条可在右侧原文继续核对。" if len(references) > len(visible_references) else ""
-        return (
-            f"我在文末参考文献区域解析到 {len(references)} 条条目：\n\n"
-            f"{chr(10).join(lines)}{more}\n\n"
-            f"这些条目来自参考文献区域。{citations}"
-        )
-
-    def _render_compound_takeaways(
-        self,
-        profile: DocumentProfile,
-        items: list[EvidenceItem],
-        text: str,
-        question: str,
-        memory_facts: dict[str, str],
-    ) -> str:
-        points = self._learning_points_for_profile(
-            profile=profile,
-            question=question,
-            text=text,
-            memory_facts=memory_facts,
-        )[:3]
-        citations = self._join_citations(
-            [
-                self._first_citation_with(items, ["机制", "系统", "流程", "应用场景", "实验目的"], fallback=False),
-                self._first_citation_with(items, ["风险", "隐私", "算法偏差", "学术诚信", "责任边界"], fallback=False),
-                self._first_citation_with(items, ["人机协同", "治理", "价值对齐", "过程可控"], fallback=False),
-            ]
-        )
-        if not citations and items:
-            citations = self._join_citations([items[0].citation_id])
-        body = "\n".join(f"{index}. {point}" for index, point in enumerate(points, start=1))
-        major = self._extract_major_from_context(question, memory_facts)
-        intro = (
-            f"从{major}专业学习角度，建议重点收获这三点："
-            if major
-            else "你这次只说“专业角度”，但我没有读到具体专业；我先说明边界，再给通用阅读收获："
-        )
-        return f"{intro}\n\n{body}\n\n这些收获不是凭空扩展，而是从文档主题、方法、场景和风险治理线索中提炼出来的。{citations}"
-
-    def _render_compound_reliability(
-        self,
-        profile: DocumentProfile,
-        items: list[EvidenceItem],
-        text: str,
-    ) -> str:
-        kind_citation = self._first_citation_with(items, ["课程报告", "实验报告", "论文", "摘要", "关键词", "样稿"])
-        process_citation = self._first_citation_with(items, ["采用", "方法", "实验", "计算", "分析", "机制建构"], fallback=False)
-        support_citation = self._first_citation_with(items, ["未来研究", "实证数据", "参考文献", "验证", "局限", "不足"], fallback=False)
-        support_points = self._reliability_support_points(
-            profile=profile,
-            all_text=text,
-            kind_citation=kind_citation,
-            process_citation=process_citation or kind_citation,
-            support_citation=support_citation or process_citation or kind_citation,
-        )
-        return (
-            f"直接判断：{self._reliability_verdict(profile)}\n\n"
-            f"理由：\n"
-            f"1. {support_points[0]}\n"
-            f"2. {support_points[1]}\n"
-            f"3. {support_points[2]}"
-        )
-
-    def _render_compound_method(
-        self,
-        profile: DocumentProfile,
-        items: list[EvidenceItem],
-        text: str,
-    ) -> str:
-        citation = self._join_citations(
-            [
-                self._first_citation_with(items, ["研究方法", "采用", "文献分析", "情境推演", "机制建构"], fallback=False),
-                self._first_citation_with(items, ["实验方法", "实验步骤", "实现过程", "流程"], fallback=False),
-            ]
-        )
-        if profile.kind == "实验报告" or "实验步骤" in text or "实验目的" in text:
-            summary = self._summarize_document_for_compare(items)
-            return (
-                f"它的方法/实现过程可以概括为：围绕{summary['implementation']}展开。"
-                f"这类文档更像实验过程说明，重点是把知识点{summary['knowledge']}落实到具体步骤。{citation}"
-            )
-        method_sentences = self._method_sentences(text, limit=2)
-        detail = "；".join(method_sentences) if method_sentences else profile.method
-        return (
-            f"它的方法可以概括为：{profile.method}。"
-            f"这意味着它更侧重观点梳理、框架建构或案例推演；如果要判断研究强度，还要看有没有样本、数据和验证过程。"
-            f"{citation}\n\n原文中与方法最相关的信息是：{detail}{citation}"
-        )
-
-    def _render_compound_limitations(
-        self,
-        profile: DocumentProfile,
-        items: list[EvidenceItem],
-        text: str,
-        question: str,
-    ) -> str:
-        return self._render_research_limitation_section(profile, items)
-
-    def _render_compound_conclusion(
-        self,
-        profile: DocumentProfile,
-        items: list[EvidenceItem],
-        text: str,
-    ) -> str:
-        conclusion = self._extract_conclusion_from_text(text) or profile.main_claim
-        citation = self._join_citations(
-            [
-                self._first_citation_with(items, ["结论与展望", "总体而言", "研究认为", "综上所述"], fallback=False),
-                self._first_citation_with(items, ["结论", "发现", "核心观点"], fallback=False),
-            ]
-        )
-        return f"核心结论可以概括为：{conclusion}{citation}"
-
-    def _build_local_structured_review_answer(
-        self,
-        question: str,
-        evidence: list[EvidenceItem],
-        memory_facts: dict[str, str] | None = None,
-        document_ids: list[str] | None = None,
-    ) -> str:
-        if not evidence:
-            return "我没有找到足够的原文证据，所以不能按你的模板完成概括、分部分分析和可靠性判断。"
-
-        grouped = self._group_evidence_by_document(evidence)
-        resolved_document_ids = self._resolve_document_ids(document_ids)
-        profile_by_document = {
-            profile.name: profile
-            for profile in [
-                self._build_document_profile(document_id)
-                for document_id in resolved_document_ids
-            ]
-        }
-        all_context = " ".join(item.text for item in evidence)
-        audience_note = self._audience_note(memory_facts or {}, question, all_context).strip()
-        sections: list[str] = []
-        if audience_note:
-            sections.append(audience_note)
-
-        for doc_index, (name, items) in enumerate(grouped.items(), start=1):
-            profile = profile_by_document.get(name) or self._profile_from_evidence(items)
-            all_text = self._sanitize_evidence_text(" ".join(item.text for item in items))
-            overview_citation = self._first_citation_with(items, ["摘要", "本文围绕", "关键词", "研究主题"])
-            method_citation = self._first_citation_with(items, ["采用", "文献分析", "情境推演", "机制建构"])
-            mechanism_citation = self._first_citation_with(
-                items,
-                ["认知支架", "资源重组", "过程陪伴", "反馈生成", "组织协同", "运行机制"],
-            )
-            scenario_citation = self._first_citation_with(
-                items,
-                ["课程学习场景", "实验与实践教学", "学业预警", "学习支持场景", "应用场景"],
-            )
-            risk_citation = self._first_citation_with(
-                items,
-                ["学习依赖", "信息准确性", "数据隐私", "算法偏差", "学术诚信", "责任边界", "风险"],
-            )
-            governance_citation = self._first_citation_with(
-                items,
-                ["人机协同", "价值对齐", "过程可控", "数据最小化", "多主体治理", "治理"],
-            )
-            risk_governance_citations = self._join_citations([risk_citation, governance_citation])
-            conclusion_citation = self._first_citation_with(
-                items,
-                ["结论与展望", "未来研究", "实证数据", "总体而言"],
-            )
-            reference_citation = self._first_citation_with(items, ["参考文献", "[1]", "研究[J]"], fallback=False)
-
-            title = profile.title or name
-            topic = self._extract_topic_from_text(all_text) or title
-            conclusion = self._extract_conclusion_from_text(all_text) or profile.main_claim
-            method = profile.method if profile.method else "原文没有清楚给出研究方法"
-            learning_points = self._learning_points_for_profile(
-                profile=profile,
-                question=question,
-                text=all_text,
-                memory_facts=memory_facts or {},
-            )[:3]
-            reliability_points = self._reliability_support_points(
-                profile=profile,
-                all_text=all_text,
-                kind_citation=overview_citation,
-                process_citation=method_citation,
-                support_citation=conclusion_citation or reference_citation,
-            )
-
-            heading = f"第 {doc_index} 篇文档：《{name}》\n\n" if len(grouped) > 1 else ""
-            sections.append(
-                f"{heading}"
-                f"一、先总结概括\n\n"
-                f"这篇文档主要讨论《{topic}》。它的核心意思是：生成式人工智能可以为高校学习支持服务提供新的能力，"
-                f"但这种能力必须放在教育目标、制度约束和风险治理中理解，不能简单等同于“技术越强越好”。[{overview_citation}]\n\n"
-                f"二、再详细分析每一部分\n\n"
-                f"1. 研究背景与问题：文档关注高校学习支持服务在个性化、持续反馈、资源供给和组织协同方面的现实压力，"
-                f"并把生成式人工智能作为一种可能的支持工具来讨论。[{overview_citation}]\n\n"
-                f"2. 研究方法：原文说明主要采用{method}。这说明它更偏理论分析和框架建构，而不是大样本实证研究。[{method_citation}]\n\n"
-                f"3. 作用机制：文档把 AI 的作用概括为认知支架、资源重组、过程陪伴、反馈生成和组织协同等方向，"
-                f"重点不是单个模型能力，而是 AI 如何嵌入学习支持流程。[{mechanism_citation}]\n\n"
-                f"4. 应用场景：它讨论了课程学习、实验实践、学业预警与辅导等场景，说明作者想把 AI 放到具体教育流程里分析。[{scenario_citation}]\n\n"
-                f"5. 风险与治理：文档提醒学习依赖、信息准确性、数据隐私、算法偏差、学术诚信和责任边界等风险，"
-                f"并提出人机协同、价值对齐、过程可控、数据最小化和多主体治理等思路。{risk_governance_citations}\n\n"
-                f"三、从你的专业角度看，可以重点学什么\n\n"
-                f"1. {learning_points[0]}\n"
-                f"2. {learning_points[1]}\n"
-                f"3. {learning_points[2]}\n\n"
-                f"四、最后判断这篇论文的可靠性\n\n"
-                f"直接判断：{self._reliability_verdict(profile)}\n\n"
-                f"理由是：\n"
-                f"1. {reliability_points[0]}\n"
-                f"2. {reliability_points[1]}\n"
-                f"3. {reliability_points[2]}\n\n"
-                f"五、一句话总结\n\n"
-                f"这篇文档适合用来学习“AI 教育应用如何做系统化分析”，但如果要把它当作严格论文结论，还需要进一步核对真实数据、样本、方法和实证验证。"
-                f"[{conclusion_citation or overview_citation}]"
-            )
-
-        return "\n\n".join(sections)
-
     def _build_local_reference_answer(
         self,
         question: str,
@@ -1400,272 +1034,6 @@ class AgentAnsweringMixin:
                 f"{label}文末列出了 {len(references)} 条参考文献，整理如下：\n\n"
                 f"{chr(10).join(reference_lines)}\n\n"
                 f"这些条目来自文末参考文献区域。{citations}"
-            )
-
-        return "\n\n".join(sections)
-
-    def _build_local_research_limitation_answer(
-        self,
-        question: str,
-        evidence: list[EvidenceItem],
-        memory_facts: dict[str, str] | None = None,
-        document_ids: list[str] | None = None,
-    ) -> str:
-        if not evidence:
-            return (
-                "我没有找到能直接支撑“文章研究局限”的原文证据，所以不应该把正文里的困难/不足硬说成文章局限。\n\n"
-                "要回答这个问题，最好看到作者关于研究方法、数据来源、样本、实证验证、讨论或未来研究的说明。"
-            )
-
-        grouped = self._group_evidence_by_document(evidence)
-        audience_note = self._audience_note(
-            memory_facts or {},
-            question,
-            " ".join(item.text for item in evidence),
-        ).strip()
-        sections: list[str] = []
-        if audience_note:
-            sections.append(audience_note)
-
-        intro = "我会把“文章局限”限定为研究设计、证据边界和未来研究空间，不把正文里研究对象本身的困难当成文章局限。"
-        sections.append(intro)
-
-        for index, (name, items) in enumerate(grouped.items(), start=1):
-            profile = (
-                self._build_document_profile(items[0].document_id)
-                if items and items[0].document_id
-                else self._profile_from_evidence(items)
-            )
-            label = f"第 {index} 篇文档《{name}》" if len(grouped) > 1 else f"《{name}》"
-            sections.append(f"{label}的局限可以这样看：\n\n{self._render_research_limitation_section(profile, items)}")
-
-        return "\n\n".join(sections)
-
-    def _render_research_limitation_section(
-        self,
-        profile: DocumentProfile,
-        items: list[EvidenceItem],
-    ) -> str:
-        text = self._sanitize_evidence_text(" ".join(item.text for item in items))
-        future_citation = self._first_citation_with(
-            items,
-            ["未来研究", "实证数据", "检验", "验证"],
-            fallback=False,
-        )
-        group_citation = self._first_citation_with(
-            items,
-            ["不同学生群体", "使用差异"],
-            fallback=False,
-        )
-        method_citation = (
-            self._first_citation_with_all(items, ["文献分析", "情境推演"])
-            or self._first_citation_with_all(items, ["采用", "文献分析"])
-            or self._first_citation_with_all(items, ["采用", "机制建构"])
-            or self._first_citation_with(items, ["研究方法"], fallback=False)
-        )
-        direct_section_citation = self._first_citation_with(
-            items,
-            ["局限性", "研究局限", "研究不足", "局限与不足", "不足与展望", "结论与展望"],
-            fallback=False,
-        )
-
-        lines: list[str] = []
-        if future_citation:
-            lines.append(
-                f"1. 原文把进一步的实证检验放到未来研究里，说明当前结论还没有被充分的真实数据或多场景验证支撑。"
-                f"[{future_citation}]"
-            )
-        elif direct_section_citation:
-            lines.append(
-                f"1. 原文在结论、展望或局限相关位置出现研究边界说明，说明作者并没有把当前结论当成已经完全验证的结论。"
-                f"[{direct_section_citation}]"
-            )
-
-        if group_citation and group_citation != future_citation:
-            lines.append(
-                f"{len(lines) + 1}. 原文还把不同学生群体或使用差异留作继续比较的内容，说明它对群体差异的讨论还不充分。"
-                f"[{group_citation}]"
-            )
-
-        if method_citation:
-            lines.append(
-                f"{len(lines) + 1}. 从方法看，它主要是{profile.method}，这类方法适合梳理框架和提出解释，但不能单独证明实际效果已经发生。"
-                f"[{method_citation}]"
-            )
-
-        if not profile.has_empirical_data:
-            support_citation = future_citation or method_citation or direct_section_citation
-            if support_citation:
-                lines.append(
-                    f"{len(lines) + 1}. 当前证据没有看到样本、问卷、访谈、实验或统计检验，因此它的结论更适合作为理论分析或研究假设，而不是强实证结论。"
-                    f"[{support_citation}]"
-                )
-
-        if not lines:
-            citations = self._join_citations([item.citation_id for item in items[:2]])
-            return (
-                "原文没有直接列出清晰的“局限性/研究不足”段落；从已检索到的证据看，也缺少能支撑具体局限判断的研究边界说明。"
-                f"因此我不能把正文里的普通困难或风险硬说成文章局限。{citations}"
-            )
-
-        body = "\n".join(lines[:4])
-        return (
-            f"{body}\n\n"
-            "这些是文章研究层面的局限，不是正文中被研究对象自身存在的“困难/不足”。"
-        )
-
-    def _build_local_reliability_answer(
-        self,
-        question: str,
-        evidence: list[EvidenceItem],
-        memory_facts: dict[str, str] | None = None,
-        document_ids: list[str] | None = None,
-    ) -> str:
-        if not evidence:
-            return (
-                "直接结论：我现在不能判断这篇文档的结果是否可靠，因为没有检索到足够的原文证据。\n\n"
-                "要回答这个问题，至少需要看到它的研究方法、数据来源、结果推导、结论和局限说明。"
-            )
-
-        grouped = self._group_evidence_by_document(evidence)
-        audience_note = self._audience_note(
-            memory_facts or {},
-            question,
-            " ".join(item.text for item in evidence),
-        ).strip()
-        resolved_document_ids = self._resolve_document_ids(document_ids)
-        profile_by_document = {
-            profile.name: profile
-            for profile in [
-                self._build_document_profile(document_id)
-                for document_id in resolved_document_ids
-            ]
-        }
-        sections: list[str] = []
-        if audience_note:
-            sections.append(audience_note)
-
-        for index, (name, items) in enumerate(grouped.items(), start=1):
-            profile = profile_by_document.get(name) or self._profile_from_evidence(items)
-            all_text = self._sanitize_evidence_text(" ".join(item.text for item in items))
-            kind_citation = self._first_citation_with(
-                items,
-                ["随机生成", "样稿", "课程报告", "实验报告", "论文", "摘要", "关键词", "课程", "报告"],
-            )
-            process_citation = self._first_citation_with(
-                items,
-                ["采用", "文献分析", "情境推演", "机制建构", "计算", "公式", "分析", "评价", "一致性检验", "测试", "结果", "结论"],
-            )
-            support_citation = self._first_citation_with(
-                items,
-                ["未来研究", "实证数据", "参考文献", "数据来源", "资料来源", "出处", "误差", "验证", "一致性检验", "后评价", "局限", "不足"],
-            )
-            used_citations = self._join_citations(
-                [kind_citation, process_citation, support_citation] or [items[0].citation_id]
-            )
-
-            verdict = self._reliability_verdict(profile)
-            support_points = self._reliability_support_points(
-                profile=profile,
-                all_text=all_text,
-                kind_citation=kind_citation,
-                process_citation=process_citation,
-                support_citation=support_citation,
-            )
-
-            label = f"第 {index} 份文档" if len(grouped) > 1 else "这份文档"
-            title_line = f"《{profile.title}》" if profile.title else f"《{name}》"
-            sections.append(
-                f"{label}{title_line}：\n\n"
-                f"直接结论：{verdict}\n\n"
-                f"为什么这样判断：\n"
-                f"1. {support_points[0]}\n"
-                f"2. {support_points[1]}\n"
-                f"3. {support_points[2]}\n\n"
-                f"可以相信到什么程度：它适合作为理解“生成式人工智能如何支持高校学习服务”的观点框架和写作参考；"
-                f"但如果要把它当成严格研究结论，还需要补充样本、数据来源、实证检验或更清楚的方法说明。{used_citations}"
-            )
-
-        answer = "\n\n".join(sections)
-        return self._ensure_answer_relevance(question, answer, evidence)
-
-    def _build_local_title_alignment_answer(
-        self,
-        question: str,
-        evidence: list[EvidenceItem],
-        memory_facts: dict[str, str] | None = None,
-        document_ids: list[str] | None = None,
-    ) -> str:
-        if not evidence:
-            return (
-                "直接结论：我现在不能判断结论能不能支撑题目，因为没有检索到题目、结论或关键论证段落。"
-            )
-
-        grouped = self._group_evidence_by_document(evidence)
-        resolved_document_ids = self._resolve_document_ids(document_ids)
-        profile_by_document = {
-            profile.name: profile
-            for profile in [
-                self._build_document_profile(document_id)
-                for document_id in resolved_document_ids
-            ]
-        }
-        audience_note = self._audience_note(
-            memory_facts or {},
-            question,
-            " ".join(item.text for item in evidence),
-        ).strip()
-        sections: list[str] = []
-        if audience_note:
-            sections.append(audience_note)
-
-        for index, (name, items) in enumerate(grouped.items(), start=1):
-            profile = profile_by_document.get(name) or self._profile_from_evidence(items)
-            title_citation = self._first_citation_with(items, ["机制", "风险", "治理路径", "论文样稿", "题目", "研究"])
-            mechanism_citation = self._first_citation_with(
-                items,
-                ["认知支架", "资源重组", "过程陪伴", "反馈生成", "组织协同", "管理协同", "运行机制"],
-            )
-            risk_citation = self._first_citation_with(
-                items,
-                ["学习依赖", "信息准确性", "数据隐私", "算法偏差", "学术诚信", "责任边界"],
-            )
-            governance_citation = self._first_citation_with_all(
-                items,
-                ["针对上述风险", "人机协同"],
-            )
-            if not governance_citation:
-                governance_citation = self._first_citation_with(
-                    items,
-                    ["价值对齐", "过程可控", "多主体治理", "治理框架"],
-                )
-            limitation_citation = self._first_citation_with(
-                items,
-                ["未来研究可以进一步通过实证数据检验", "未来研究", "实证数据"],
-                fallback=False,
-            )
-            if not limitation_citation:
-                limitation_citation = self._first_citation_with(
-                    items,
-                    ["文献分析", "情境推演", "机制建构", "样稿"],
-                )
-            used_citations = self._join_citations(
-                [title_citation, mechanism_citation, risk_citation, governance_citation, limitation_citation]
-            )
-
-            label = f"第 {index} 份文档" if len(grouped) > 1 else "这篇论文"
-            sections.append(
-                f"{label}《{profile.title}》：\n\n"
-                "直接结论：基本能支撑题目，但支撑强度不算很强。它能对应题目里的“机制、风险、治理路径”三个关键词，"
-                "不过更多是理论框架式支撑，不是实证数据支撑。\n\n"
-                "我为什么这么判断：\n"
-                f"1. 题目本身要求回答三个部分：生成式人工智能如何赋能学习支持服务的机制、可能风险、以及治理路径。[{title_citation}]\n"
-                f"2. 结论能回应“机制”：原文把作用机制概括为认知支架、资源重组、过程陪伴、反馈生成和组织协同等内容，这和题目中的“机制”是对应的。[{mechanism_citation}]\n"
-                f"3. 结论能回应“风险”：原文讨论了学习依赖、信息准确性、数据隐私、算法偏差、学术诚信和责任边界等问题，这和题目中的“风险”是对应的。[{risk_citation}]\n"
-                f"4. 结论也能回应“治理路径”：原文提出人机协同、价值对齐、过程可控、数据最小化和多主体治理，这和题目中的“治理路径”是对应的。[{governance_citation}]\n\n"
-                f"不足在哪里：它支撑题目主要靠概念分析和框架归纳。原文方法更偏{profile.method}，并且把进一步通过实证数据检验放在未来研究里，"
-                f"所以它能支撑题目方向，但还不能强力证明题目中的观点已经被真实数据验证。[{limitation_citation}]\n\n"
-                f"一句话：不算跑题，结论能支撑题目；但如果按严格论文标准看，它的支撑偏“理论上说得通”，还缺少“数据上证明了”。{used_citations}"
             )
 
         return "\n\n".join(sections)
@@ -2019,74 +1387,6 @@ class AgentAnsweringMixin:
         if "未来研究可以进一步通过实证数据检验" in text:
             return False
         return any(keyword in text for keyword in empirical_keywords)
-
-    def _reliability_verdict(self, profile: DocumentProfile) -> str:
-        if profile.is_generated_sample:
-            return (
-                "不适合把它的“结果”当成可靠研究结论直接采信。它更像一篇生成式中文论文样稿，"
-                "可以参考其结构、问题意识和治理框架，但不能把其中观点当作经过真实研究验证的结论。"
-            )
-        if profile.kind == "课程报告":
-            return "它可以作为课程作业或方法演示来参考，但不能直接当作严格论文结论采信。"
-        if profile.kind == "实验报告":
-            return "它可以作为实验过程记录参考，但可靠性仍取决于实验设计、数据来源和验证是否完整。"
-        if profile.kind == "论文" and profile.has_empirical_data:
-            return "它具备一定研究论文形态，结果有参考价值，但仍需要核对样本、数据、方法和结论是否一一对应。"
-        if profile.kind == "论文":
-            return "它的观点有一定参考价值，但更偏理论分析或综述推演，不能等同于已经被实证证明的结果。"
-        return "当前证据不足以判定它的结果可靠，只能作为有限参考。"
-
-    def _reliability_support_points(
-        self,
-        *,
-        profile: DocumentProfile,
-        all_text: str,
-        kind_citation: str,
-        process_citation: str,
-        support_citation: str,
-    ) -> list[str]:
-        points: list[str] = []
-        if profile.is_generated_sample:
-            points.append(f"原文标题或说明里出现“随机生成的中文论文样稿”这类表述，说明它不是严格意义上的真实研究成果。[{kind_citation}]")
-        else:
-            points.append(f"从文档结构看，它更接近“{profile.kind}”；判断可靠性时要按这个文档类型来要求证据。[{kind_citation}]")
-
-        if profile.method and "没有清楚" not in profile.method:
-            points.append(f"它说明采用了{profile.method}，这能支持理论梳理和框架建构，但不能单独证明应用效果真实发生。[{process_citation}]")
-        else:
-            points.append(f"当前证据没有清楚呈现可复核的方法、样本或数据来源，所以结果支撑偏弱。[{process_citation}]")
-
-        if "未来研究可以进一步通过实证数据检验" in all_text:
-            points.append(f"原文自己也把“通过实证数据检验不同应用场景的效果”放到未来研究中，这说明当前结论还缺少实证验证。[{support_citation}]")
-        elif profile.has_empirical_data:
-            points.append(f"文中出现了实证或数据线索，但还需要继续核对样本、指标、统计过程和结论之间是否匹配。[{support_citation}]")
-        elif profile.has_references:
-            points.append(f"文末有参考文献，能说明它有一定资料来源，但引用本身不能替代对核心结论的实证检验。[{support_citation}]")
-        else:
-            points.append("当前证据没有清楚展示数据来源、实验/问卷/访谈设计或误差分析，这是可靠性判断的主要缺口。")
-
-        return points
-
-    def _ensure_answer_relevance(
-        self,
-        question: str,
-        answer: str,
-        evidence: list[EvidenceItem],
-    ) -> str:
-        if not self._looks_like_reliability_question(question):
-            return answer
-        banned_phrases = ["先纠正刚才", "回答方式", "不能只摘一个相似度最高"]
-        if any(phrase in answer for phrase in banned_phrases):
-            profile = self._profile_from_evidence(evidence)
-            citation = evidence[0].citation_id if evidence else "E1"
-            return (
-                f"直接结论：这篇文档的结果不能直接判定为可靠。"
-                f"它更像“{profile.kind}”，需要结合方法、数据来源和验证过程来判断。[{citation}]\n\n"
-                "目前证据不足以证明它的结论已经经过严格验证，因此更适合作为参考材料，而不是直接当作可靠研究结论。"
-            )
-        if "直接结论" not in answer:
-            return f"直接结论：{answer}"
-        return answer
 
     def _build_local_grouped_answer(
         self,

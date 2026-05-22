@@ -31,7 +31,7 @@
 
 1. 前端把问题发送给 FastAPI。
 2. LangGraph 读取记忆，判断是否需要检索文档。
-3. 系统根据问题从 Chroma 向量库中检索相关 chunk。
+3. 系统使用 Dense 向量召回和 BM25 sparse 召回分别找候选 chunk，再用 RRF 融合排序。
 4. 后端把证据、用户问题、最近对话和记忆组合进 Prompt。
 5. 模型生成回答，前端把引用变成可点击的原文证据。
 6. 系统更新短期历史和长期用户偏好。
@@ -39,7 +39,7 @@
 教学观察面板会展示：
 
 - 本轮运行链路。
-- RAG 检索过程、top-k、score、向量库记录数。
+- RAG 检索过程、top-k、score、检索管线、RRF 排序方式、向量库记录数。
 - 每篇文档的页数、chunk 数、chunk_size、overlap、切分理由。
 - 最终用于回答的证据。
 - 记忆系统当前用到的信息。
@@ -119,13 +119,23 @@ http://127.0.0.1:8000/docs
 6. 调用 embedding 模型生成向量；如果远程 embedding 暂时失败，会降级到本地备用检索。
 7. chunk、embedding、metadata 写入 Chroma 持久化向量库。
 8. 用户提问时，LangGraph 读取记忆，判断是否需要检索。
-9. retriever 节点检索 top-k 证据。
-10. answer 节点把证据、记忆和短期历史组成最终 prompt，生成回答。
-11. 前端展示回答、引用、原文证据，并在教学观察面板展示 chunk、score、top-k、向量库记录和最终使用证据。
+9. retriever 节点同时运行 Dense 向量召回和 BM25 sparse 召回，并只合并少量结构化候选，例如字段、参考文献和文档概览。
+10. 系统用 RRF 融合多路候选，直接按 RRF 融合分排序，不使用 rerank 模型。
+11. answer 节点把证据、记忆和短期历史组成最终 prompt，生成回答。
+12. 前端展示回答、引用、原文证据，并在教学观察面板展示 chunk、score、top-k、检索管线、排序方式和最终使用证据。
 
 ## 为什么同时有 LangChain 和 LangGraph
 
-项目使用 LangGraph 做 agent 流程编排，用 `StateGraph` 表达 `memory -> planner -> retriever -> answer -> memory_writer`。
+项目使用 LangGraph 做 agent 流程编排，并由 `self.graph.stream(...)` 执行真实 runtime。当前 `StateGraph` 不是固定直线流程，而是：
+
+```text
+memory -> planner -> answer
+                 \-> retriever -> evidence_judge -> answer
+                                               \-> retrieval_refiner -> retriever
+answer -> verifier -> memory_writer
+```
+
+也就是说，普通使用说明类问题会跳过文档检索；文档问答会先检索和裁判证据；如果证据为空、过弱或只有一条孤证，图会扩大检索范围再跑一轮；重试后仍缺少直接证据时，回答节点会拒绝硬编。
 
 项目没有使用完整 LangChain 链式框架，但使用了 LangChain 的消息类型和模型生态适配能力，例如 `SystemMessage`、`HumanMessage`。因此依赖里出现 `langgraph` 和 `langchain-openai` 是合理的：前者负责编排，后者负责模型消息和供应商适配。
 

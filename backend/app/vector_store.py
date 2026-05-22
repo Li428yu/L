@@ -48,12 +48,23 @@ class ChromaPaperStore:
                     "document_id": chunk.document_id,
                     "paper_name": chunk.paper_name,
                     "page": chunk.page,
+                    "page_start": chunk.page_start,
+                    "page_end": chunk.page_end,
                     "section": chunk.section,
                     "source": chunk.source,
                     "file_hash": chunk.file_hash,
                     "quote": chunk.quote,
                     "char_start": chunk.char_start,
                     "char_end": chunk.char_end,
+                    "token_count": chunk.token_count,
+                    "chunk_type": chunk.chunk_type,
+                    "parent_id": chunk.parent_id,
+                    "parent_text": chunk.parent_text,
+                    "parent_page_start": chunk.parent_page_start,
+                    "parent_page_end": chunk.parent_page_end,
+                    "parent_char_start": chunk.parent_char_start,
+                    "parent_char_end": chunk.parent_char_end,
+                    "parent_token_count": chunk.parent_token_count,
                     "embedding_model": embedding_model,
                 }
                 for chunk in chunks
@@ -95,14 +106,22 @@ class ChromaPaperStore:
                     document_id=str(metadata.get("document_id", "")),
                     paper_name=str(metadata.get("paper_name", "")),
                     page=int(metadata.get("page", 0) or 0),
+                    page_start=int(metadata.get("page_start", metadata.get("page", 0)) or 0),
+                    page_end=int(metadata.get("page_end", metadata.get("page", 0)) or 0),
                     section=str(metadata.get("section") or ""),
                     source=str(metadata.get("source", "")),
                     file_hash=str(metadata.get("file_hash", "")),
                     score=score,
+                    vector_score=score,
+                    final_score=score,
+                    score_source="vector",
                     text=str(documents[index] if index < len(documents) else ""),
                     quote=str(metadata.get("quote", "")),
                     char_start=int(metadata.get("char_start", 0) or 0),
                     char_end=int(metadata.get("char_end", 0) or 0),
+                    token_count=int(metadata.get("token_count", 0) or 0),
+                    chunk_type=str(metadata.get("chunk_type") or "text"),
+                    parent_id=str(metadata.get("parent_id") or "") or None,
                 )
             )
         return [self._expand_evidence_context(item) for item in evidence]
@@ -155,6 +174,20 @@ class ChromaPaperStore:
             -1,
         )
         if current_index < 0:
+            return item
+
+        current_row = rows[current_index]
+        current_metadata = current_row["metadata"]
+        parent_text = str(current_metadata.get("parent_text") or "").strip()
+        if parent_text:
+            item.text = parent_text
+            item.quote = self._best_quote(str(current_row["text"]))
+            item.page_start = int(current_metadata.get("parent_page_start", item.page_start or item.page) or item.page)
+            item.page_end = int(current_metadata.get("parent_page_end", item.page_end or item.page) or item.page)
+            item.char_start = int(current_metadata.get("parent_char_start", item.char_start or 0) or 0)
+            item.char_end = int(current_metadata.get("parent_char_end", item.char_end or 0) or 0)
+            token_count = int(current_metadata.get("parent_token_count", item.token_count or 0) or 0)
+            item.token_count = token_count or item.token_count
             return item
 
         start = max(current_index - 1, 0)

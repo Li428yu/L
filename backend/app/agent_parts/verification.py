@@ -17,6 +17,7 @@ from backend.app.models import EvidenceItem, RetrievalDebugItem, RuntimeStep
 
 class AgentVerificationMixin:
     def _judge_evidence(self, state: PaperAgentState) -> PaperAgentState:
+        self._emit_status("正在判断证据是否支撑问题...")
         evidence = state.get("evidence", [])
         question = state["question"]
         strategy = state.get("retrieval_strategy", "")
@@ -24,6 +25,7 @@ class AgentVerificationMixin:
             return {
                 **state,
                 "evidence_judgments": [],
+                "evidence_quality": "none",
                 "runtime": [
                     *state.get("runtime", []),
                     RuntimeStep(
@@ -66,10 +68,17 @@ class AgentVerificationMixin:
         elif not strict:
             kept = evidence
 
+        evidence_quality = self._evidence_quality(
+            question=question,
+            evidence=kept,
+            fallback_used=False,
+            answer_strategy="model_answer",
+        )
         return {
             **state,
             "evidence": kept,
             "evidence_judgments": judgments,
+            "evidence_quality": evidence_quality,
             "runtime": [
                 *state.get("runtime", []),
                 RuntimeStep(
@@ -86,6 +95,7 @@ class AgentVerificationMixin:
         }
 
     def _verify_answer(self, state: PaperAgentState) -> PaperAgentState:
+        self._emit_status("正在核对引用...")
         verification = self._cross_verify_answer(
             question=state["question"],
             answer=state.get("answer", ""),
@@ -119,13 +129,8 @@ class AgentVerificationMixin:
 
     def _friendly_answer_strategy(self, strategy: str) -> str:
         labels = {
-            "local_compound_answer": "按用户顺序逐项回答复合任务",
             "local_reference_answer": "本地规则整理参考文献",
             "local_field_lookup_answer": "本地规则提取指定字段",
-            "local_structured_review_answer": "本地规则生成结构化阅读报告",
-            "local_title_alignment_answer": "本地规则判断题目匹配",
-            "local_reliability_answer": "本地规则判断可靠性",
-            "local_research_limitation_answer": "本地规则分析文章研究局限",
             "local_compare_answer": "本地规则对比多文档",
             "local_document_answer": "本地规则概括文档",
             "missing_evidence_refusal": "证据不足，拒绝硬答",
@@ -191,9 +196,10 @@ class AgentVerificationMixin:
 
         pages = sorted({item.page for item in evidence if item.page})
         page_text = "、".join(str(page) for page in pages[:3]) if pages else "未知位置"
+        fusion = "，并经过 RRF 融合排序" if retrieval_strategy.startswith("hybrid_") else ""
         return (
             f"本轮识别为「{self._friendly_intent(intent)}」，"
-            f"使用「{self._friendly_retrieval_strategy(retrieval_strategy)}」，"
+            f"使用「{self._friendly_retrieval_strategy(retrieval_strategy)}」{fusion}，"
             f"命中 {len(evidence)} 条证据，主要来自第 {page_text} 页/段；"
             f"回答策略是「{self._friendly_answer_strategy(answer_strategy)}」。"
         )
@@ -220,8 +226,16 @@ class AgentVerificationMixin:
                     citation_id=item.citation_id,
                     chunk_id=item.chunk_id,
                     page=item.page,
+                    page_start=item.page_start,
+                    page_end=item.page_end,
                     section=item.section,
                     score=item.score,
+                    vector_score=item.vector_score,
+                    sparse_score=item.sparse_score,
+                    rule_score=item.rule_score,
+                    rrf_score=item.rrf_score,
+                    final_score=item.final_score,
+                    score_source=item.score_source,
                     retrieval_strategy=retrieval_strategy,
                     selected_by=self._debug_selected_by(retrieval_strategy),
                     matched_keywords=matched_keywords,
@@ -240,23 +254,17 @@ class AgentVerificationMixin:
 
     def _debug_selected_by(self, retrieval_strategy: str) -> str:
         labels = {
-            "compound_request": "按子任务顺序组合检索",
             "reference_section": "规则定位参考文献区",
             "field_lookup": "按字段边界精确提取",
             "comparison_overview": "按文档抽取概览片段",
-            "structured_review": "按模板抽取多类证据",
-            "title_alignment": "题目与结论专项规则",
-            "reliability_check": "可靠性专项规则",
-            "research_limitation": "文章研究局限专项规则",
             "document_overview": "整篇文档关键词/结构检索",
-            "vector_similarity": "Chroma 向量相似度召回后重排",
-            "hybrid_soft": "模型软意图 + 向量/关键词/章节混合重排",
-            "hybrid_reference": "参考文献候选 + 混合重排",
-            "hybrid_field_lookup": "字段候选 + 混合重排",
-            "hybrid_comparison": "对比候选 + 混合重排",
-            "hybrid_judgment": "判断类候选 + 混合重排",
-            "hybrid_limitation": "局限候选 + 混合重排",
-            "hybrid_overview": "全文角色段落 + 混合重排",
+            "vector_similarity": "Chroma 向量相似度召回",
+            "hybrid_soft": "Dense 向量 + BM25 sparse 双路召回，RRF 融合排序",
+            "hybrid_reference": "参考文献候选 + 双路召回，RRF 融合排序",
+            "hybrid_field_lookup": "字段候选 + 双路召回，RRF 融合排序",
+            "hybrid_comparison": "对比候选 + 双路召回，RRF 融合排序",
+            "hybrid_overview": "全文角色候选 + 双路召回，RRF 融合排序",
+            "hybrid_retry": "扩大候选数量 + 双路召回，RRF 融合排序",
             "no_retrieval": "未检索文档",
         }
         return labels.get(retrieval_strategy, retrieval_strategy)
@@ -269,59 +277,9 @@ class AgentVerificationMixin:
         retrieval_strategy: str,
     ) -> list[str]:
         strategy_keywords = {
-            "compound_request": self._compound_focus_keywords_for_question(question),
             "reference_section": ["参考文献", "References", "[1]", "[2]", "[3]"],
             "field_lookup": self._field_lookup_debug_keywords(question),
             "comparison_overview": ["实验名称", "实验类型", "实验目的", "主题", "方法", "结论"],
-            "structured_review": [
-                "摘要",
-                "本文围绕",
-                "采用",
-                "文献分析",
-                "认知支架",
-                "资源重组",
-                "课程学习场景",
-                "风险",
-                "人机协同",
-                "未来研究",
-                "实证数据",
-                "参考文献",
-            ],
-            "title_alignment": [
-                "题目",
-                "结论",
-                "机制",
-                "风险",
-                "治理路径",
-                "未来研究",
-                "实证数据",
-            ],
-            "reliability_check": [
-                "随机生成",
-                "论文样稿",
-                "采用",
-                "文献分析",
-                "情境推演",
-                "机制建构",
-                "未来研究",
-                "实证数据",
-                "参考文献",
-            ],
-            "research_limitation": [
-                "局限性",
-                "研究局限",
-                "研究不足",
-                "结论与展望",
-                "未来研究",
-                "实证数据",
-                "验证",
-                "检验",
-                "样本",
-                "数据来源",
-                "文献分析",
-                "情境推演",
-                "机制建构",
-            ],
             "document_overview": self._overview_focus_keywords(question),
             "vector_similarity": self._question_keywords(question),
         }
@@ -343,28 +301,16 @@ class AgentVerificationMixin:
         item: EvidenceItem,
     ) -> str:
         keyword_text = "、".join(matched_keywords) if matched_keywords else "没有明显关键词，主要依赖向量相似度/结构位置"
-        if retrieval_strategy == "compound_request":
-            tasks = self._parse_compound_tasks(question)
-            task_text = " → ".join(task.label for task in tasks) if tasks else "多个子任务"
-            return f"用户问题被拆成“{task_text}”，系统按这些子任务分别抽取摘要、方法、参考文献、收获或可靠性相关证据；该 chunk 命中 {keyword_text}。"
         if retrieval_strategy == "reference_section":
             return f"问题像是在问参考文献，系统优先扫描文末参考文献区；该 chunk 命中 {keyword_text}。"
         if retrieval_strategy == "field_lookup":
             return f"问题是在提取文档字段，系统只截取目标字段到下一个字段边界之间的内容；该 chunk 命中 {keyword_text}。"
         if retrieval_strategy == "document_overview":
             return f"问题属于整篇分析/概括，系统优先找和问题目标相关的结构段落；该 chunk 命中 {keyword_text}。"
-        if retrieval_strategy == "structured_review":
-            return f"用户提出了多步骤模板要求，系统同时抽取摘要、方法、主体内容、风险治理、结论和参考文献证据；该 chunk 命中 {keyword_text}。"
-        if retrieval_strategy == "reliability_check":
-            return f"问题是在判断可靠性，系统优先找文档类型、方法、数据验证、未来研究和参考文献信息；该 chunk 命中 {keyword_text}。"
-        if retrieval_strategy == "research_limitation":
-            return f"问题是在问文章本身的研究局限，系统优先找未来研究、方法边界、数据/样本和实证验证缺口；该 chunk 命中 {keyword_text}。"
-        if retrieval_strategy == "title_alignment":
-            return f"问题是在判断题目与结论是否匹配，系统优先找题目关键词、结论、风险、治理和不足；该 chunk 命中 {keyword_text}。"
         if retrieval_strategy == "comparison_overview":
             return f"问题是多文档对比，系统为每篇文档抽取能代表主题和方法的片段；该 chunk 命中 {keyword_text}。"
         if retrieval_strategy.startswith("hybrid_"):
-            return f"系统先用模型软判断用户意图，再合并专项候选、向量召回、关键词命中和章节角色段落统一重排；该 chunk 命中 {keyword_text}。"
+            return f"系统合并 Dense 向量召回和 BM25 sparse 召回，并在字段/参考文献等明确结构问题中加入少量结构候选，用 RRF 融合排序；该 chunk 命中 {keyword_text}。"
         if retrieval_strategy == "vector_similarity":
             return f"系统把问题转成检索向量，在 Chroma 中召回相似 chunk，再按相关度和可读性筛选；该 chunk 的 score 为 {item.score:.3f}，命中 {keyword_text}。"
         return f"该证据由「{self._friendly_retrieval_strategy(retrieval_strategy)}」选中，命中 {keyword_text}。"
@@ -374,9 +320,6 @@ class AgentVerificationMixin:
             checker(question)
             for checker in [
                 self._looks_like_reference_question,
-                self._looks_like_reliability_question,
-                self._looks_like_research_limitation_question,
-                self._looks_like_title_alignment_question,
             ]
         )
 
@@ -417,50 +360,6 @@ class AgentVerificationMixin:
                 verdict = "reject"
                 confidence = 0.86
                 reason = "问题要求参考文献，但该片段不是参考文献区域。"
-        elif self._looks_like_research_limitation_question(question):
-            score = self._research_limitation_relevance_score(
-                text=text,
-                section=item.section or "",
-                index=0,
-                total=1,
-            )
-            if score >= 2.0:
-                verdict = "direct"
-                confidence = min(0.96, 0.62 + score * 0.08)
-                reason = "片段包含未来研究、实证验证、研究方法或结论边界，可支撑文章研究局限判断。"
-            elif score >= 0.85:
-                verdict = "supporting"
-                confidence = min(0.82, 0.5 + score * 0.08)
-                reason = "片段能辅助判断文章研究边界，但不是最直接的局限说明。"
-            else:
-                verdict = "reject"
-                confidence = 0.82
-                reason = "片段更像正文研究对象的困难/风险，不能直接当作文章本身的研究局限。"
-        elif self._looks_like_reliability_question(question):
-            score = self._reliability_relevance_score(text)
-            if score >= 8:
-                verdict = "direct"
-                confidence = 0.88
-                reason = "片段包含文档类型、方法、数据来源、验证或未来研究线索，可直接用于可靠性判断。"
-            elif score >= 3:
-                verdict = "supporting"
-                confidence = 0.7
-                reason = "片段提供了可靠性判断的辅助线索。"
-            else:
-                verdict = "reject"
-                confidence = 0.76
-                reason = "片段缺少方法、数据、验证或结论支撑信息，不适合用于可靠性判断。"
-        elif self._looks_like_title_alignment_question(question):
-            keywords = ["题目", "机制", "风险", "治理", "结论", "未来研究", "实证数据"]
-            hits = sum(1 for keyword in keywords if keyword in text)
-            if hits >= 2:
-                verdict = "direct"
-                confidence = 0.78
-                reason = "片段包含题目、机制、风险、治理或结论线索，可用于核对题目与结论匹配。"
-            elif hits == 1:
-                verdict = "supporting"
-                confidence = 0.62
-                reason = "片段只命中一个匹配线索，适合作为辅助证据。"
         else:
             relevance = self._question_relevance_score(question, text)
             if relevance >= 0.24 or item.score >= 0.82:

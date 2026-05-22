@@ -253,7 +253,11 @@ def preview_chunks(document_id: str) -> list[ChunkPreview]:
         ChunkPreview(
             chunk_id=str(row["id"]),
             page=int(row["metadata"].get("page", 0) or 0),
+            page_start=int(row["metadata"].get("page_start", row["metadata"].get("page", 0)) or 0),
+            page_end=int(row["metadata"].get("page_end", row["metadata"].get("page", 0)) or 0),
             section=str(row["metadata"].get("section") or ""),
+            chunk_type=str(row["metadata"].get("chunk_type") or "text"),
+            token_count=int(row["metadata"].get("token_count", 0) or 0),
             text=str(row["text"]),
         )
         for row in rows

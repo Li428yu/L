@@ -44,6 +44,13 @@ class AgentTextUtilityMixin:
         sanitized = re.sub(r"(电子邮件|邮箱)\s*[:：]\s*\S+", r"\1：[已隐藏]", sanitized)
         return sanitized
 
+    def _evidence_page_label(self, item: EvidenceItem) -> str:
+        page_start = item.page_start or item.page
+        page_end = item.page_end or page_start
+        if page_start and page_end and page_end != page_start:
+            return f"{page_start}-{page_end}"
+        return str(page_start or item.page or 0)
+
     def _first_informative_overview_row(self, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         for row in rows[:12]:
             text = str(row.get("text", ""))
@@ -449,86 +456,12 @@ class AgentTextUtilityMixin:
         if not sanitized.strip():
             return ""
 
-        if self._looks_like_compound_request(question):
-            preferred_keywords = self._compound_focus_keywords_for_question(question)
-        elif self._looks_like_reference_question(question):
+        if self._looks_like_reference_question(question):
             return self._best_reference_quote(sanitized, limit=limit)
-        elif self._looks_like_structured_review_request(question):
-            preferred_keywords = [
-                "摘要",
-                "本文围绕",
-                "采用",
-                "文献分析",
-                "认知支架",
-                "资源重组",
-                "课程学习场景",
-                "风险",
-                "人机协同",
-                "未来研究",
-                "实证数据",
-                "参考文献",
-            ]
-        elif self._looks_like_title_alignment_question(question):
-            preferred_keywords = [
-                "机制、风险与治理路径",
-                "未来研究",
-                "实证数据",
-                "认知支架",
-                "资源重组",
-                "过程陪伴",
-                "反馈生成",
-                "组织协同",
-                "学习依赖",
-                "信息准确性",
-                "数据隐私",
-                "算法偏差",
-                "学术诚信",
-                "责任边界",
-                "人机协同",
-                "价值对齐",
-                "过程可控",
-                "数据最小化",
-                "多主体治理",
-                "未来研究",
-                "实证数据",
-                "文献分析",
-                "情境推演",
-                "机制建构",
-            ]
-        elif self._looks_like_reliability_question(question):
-            preferred_keywords = [
-                "随机生成",
-                "论文样稿",
-                "采用",
-                "文献分析",
-                "情境推演",
-                "机制建构",
-                "未来研究",
-                "实证数据",
-                "参考文献",
-                "风险",
-                "局限",
-            ]
-        elif self._looks_like_research_limitation_question(question):
-            preferred_keywords = [
-                "局限性",
-                "研究局限",
-                "研究不足",
-                "结论与展望",
-                "未来研究",
-                "实证数据",
-                "检验",
-                "验证",
-                "不同应用场景",
-                "不同学生群体",
-                "文献分析",
-                "情境推演",
-                "机制建构",
-            ]
         elif self._looks_like_document_wide_question(question):
             preferred_keywords = self._overview_focus_keywords(question)
         else:
-            preferred_keywords = []
+            preferred_keywords = self._question_keywords(question)
 
         candidates = [
             " ".join(part.split()).strip()

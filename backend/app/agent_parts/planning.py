@@ -17,6 +17,7 @@ from backend.app.models import EvidenceItem, RetrievalDebugItem, RuntimeStep
 
 class AgentPlanningMixin:
     def _plan(self, state: PaperAgentState) -> PaperAgentState:
+        self._emit_status("正在理解你的问题...")
         question = state["question"].strip()
         has_documents = bool(self._resolve_document_ids(state.get("document_ids")))
         needs_retrieval = has_documents and not self._looks_like_meta_question(question)
@@ -34,8 +35,7 @@ class AgentPlanningMixin:
             local_strategy=local_strategy,
             needs_retrieval=needs_retrieval,
         )
-        parsed_tasks = self._parse_compound_tasks(question)
-        task_parse_reason = self._task_parse_reason(parsed_tasks)
+        task_parse_reason = ""
         source = "模型软判断" if soft_intent.get("source") == "model" else "本地候选"
         reason = str(soft_intent.get("reason") or "").strip()
         focus = "、".join(str(item) for item in soft_intent.get("focus", [])[:4] if str(item).strip())
@@ -53,7 +53,7 @@ class AgentPlanningMixin:
             "intent": intent,
             "retrieval_strategy": retrieval_strategy,
             "soft_intent": soft_intent,
-            "compound_tasks": [task.task_type for task in parsed_tasks],
+            "compound_tasks": [],
             "task_parse_reason": task_parse_reason,
             "needs_retrieval": needs_retrieval,
             "runtime": [
@@ -97,7 +97,7 @@ class AgentPlanningMixin:
 
 请返回 JSON，字段如下：
 {{
-  "intent": "compound_request/reference_question/field_lookup_question/structured_review_request/compare_question/title_alignment_question/reliability_question/research_limitation_question/document_wide_question/meta_question/specific_question",
+  "intent": "reference_question/field_lookup_question/compare_question/document_wide_question/meta_question/specific_question",
   "operation": "extract/summarize/analyze/compare/judge/answer",
   "scope": "field/section/whole_document/multi_document/specific_point",
   "focus": ["用户真正关心的1-4个内容点"],
@@ -149,10 +149,6 @@ class AgentPlanningMixin:
         elif local_intent == "reference_question":
             preferred_roles = ["reference"]
             exclude_roles = ["front_matter", "metadata", "submission"]
-        elif local_intent == "reliability_question":
-            preferred_roles = ["approach", "result", "conclusion", "caveat", "reference"]
-        elif local_intent == "research_limitation_question":
-            preferred_roles = ["caveat", "approach", "conclusion"]
         elif contract.operation == "summarize":
             preferred_roles = list(contract.role_hints)
             exclude_roles = list(contract.exclude_roles)
@@ -163,20 +159,13 @@ class AgentPlanningMixin:
             "field_lookup_question": "extract",
             "reference_question": "extract",
             "compare_question": "compare",
-            "reliability_question": "judge",
-            "title_alignment_question": "judge",
-            "research_limitation_question": "analyze",
             "document_wide_question": "summarize",
-            "structured_review_request": "analyze",
-            "compound_request": "analyze",
         }.get(local_intent, "answer")
         scope = {
             "field_lookup_question": "field",
             "reference_question": "section",
             "compare_question": "multi_document",
             "document_wide_question": "whole_document",
-            "structured_review_request": "whole_document",
-            "compound_request": "whole_document",
         }.get(local_intent, "specific_point")
         if contract.scope == "whole_document":
             scope = "whole_document"
@@ -222,14 +211,9 @@ class AgentPlanningMixin:
         source: str,
     ) -> dict[str, Any]:
         allowed_intents = {
-            "compound_request",
             "reference_question",
             "field_lookup_question",
-            "structured_review_request",
             "compare_question",
-            "title_alignment_question",
-            "reliability_question",
-            "research_limitation_question",
             "document_wide_question",
             "meta_question",
             "specific_question",
@@ -295,11 +279,9 @@ class AgentPlanningMixin:
             return "hybrid_field_lookup"
         if intent == "compare_question" or scope == "multi_document":
             return "hybrid_comparison"
-        if intent in {"reliability_question", "title_alignment_question"} or operation == "judge":
-            return "hybrid_judgment"
-        if intent == "research_limitation_question":
-            return "hybrid_limitation"
-        if intent in {"document_wide_question", "structured_review_request", "compound_request"} or scope == "whole_document":
+        if operation == "judge":
+            return "hybrid_soft"
+        if intent == "document_wide_question" or scope == "whole_document":
             return "hybrid_overview"
         return "hybrid_soft" if local_strategy != "no_retrieval" else local_strategy
 
@@ -365,14 +347,8 @@ class AgentPlanningMixin:
 
         if self._looks_like_reference_question(question):
             candidates.append("用户可能是在查参考文献或引用来源；此时应优先列出文献条目，不要概括正文。")
-        if self._looks_like_reliability_question(question):
-            candidates.append("用户可能是在判断结论或结果是否可信；应核对方法、数据、验证过程、样本和证据缺口。")
         if self._looks_like_compare_question(question):
             candidates.append("用户可能是在比较多个对象；应按对象分别说明，再给出差异或共同点。")
-        if self._looks_like_title_alignment_question(question):
-            candidates.append("用户可能是在判断题目、结论和正文是否匹配；应检查题目关键词是否被证据回应。")
-        if self._looks_like_research_limitation_question(question):
-            candidates.append("用户可能是在问研究局限；应重点看方法边界、数据不足、验证缺口和未来研究。")
 
         if not candidates:
             candidates.append("用户可能是在问一个具体内容点；请先判断目标概念或对象，再基于最相关证据直接回答。")
@@ -389,201 +365,35 @@ class AgentPlanningMixin:
             ]
         )
 
-    def _task_definitions(self) -> list[tuple[str, str, list[str]]]:
-        return [
-            (
-                "overview_summary",
-                "总体概括",
-                [
-                    "总体概括",
-                    "整体概括",
-                    "概括",
-                    "总结",
-                    "文章内容",
-                    "主要内容",
-                    "讲了什么",
-                    "讲什么",
-                    "主要讲",
-                    "大意",
-                    "主题",
-                ],
-            ),
-            (
-                "reference_list",
-                "参考文献",
-                [
-                    "参考文献",
-                    "参考资料",
-                    "引用文献",
-                    "文献列表",
-                    "用了哪些文献",
-                    "用了哪些参考",
-                    "参考了哪些",
-                    "引用了哪些",
-                    "列出文献",
-                    "文献来源",
-                    "references",
-                    "bibliography",
-                ],
-            ),
-            (
-                "professional_takeaways",
-                "专业角度收获",
-                [
-                    "专业角度",
-                    "从我的专业",
-                    "从我专业",
-                    "结合我的专业",
-                    "能收获什么",
-                    "能学到什么",
-                    "学到什么",
-                    "收获",
-                    "启发",
-                    "启示",
-                    "专业收获",
-                ],
-            ),
-            ("reliability_judgment", "可靠性判断", ["可靠性", "可靠吗", "可靠", "可信", "靠不靠谱", "能不能信"]),
-            (
-                "method_analysis",
-                "方法分析",
-                ["研究方法", "实验方法", "方法是什么", "用了什么方法", "采用什么方法", "怎么做", "如何研究", "如何实现"],
-            ),
-            ("limitation_analysis", "局限不足", ["局限", "不足", "存在的问题", "有什么问题", "短板", "缺陷"]),
-            ("conclusion_summary", "结论核心", ["结论", "核心观点", "主要发现", "发现"]),
-            ("comparison", "对比", ["对比", "比较", "不同点", "差异", "区别"]),
-        ]
-
-    def _parse_compound_tasks(self, question: str) -> list[ParsedTask]:
-        tasks: list[ParsedTask] = []
-
-        def add_task(task_type: str, label: str, position: int, trigger: str) -> None:
-            tasks.append(
-                ParsedTask(
-                    task_type=task_type,
-                    label=label,
-                    position=position,
-                    trigger=trigger,
-                )
-            )
-
-        for task_type, label, keywords in self._task_definitions():
-            best_position = -1
-            best_trigger = ""
-            for keyword in keywords:
-                position = question.find(keyword)
-                if position < 0:
-                    continue
-                if best_position < 0 or position < best_position:
-                    best_position = position
-                    best_trigger = keyword
-            if best_position >= 0:
-                add_task(task_type, label, best_position, best_trigger)
-
-        if "方法" in question and not any(task.task_type == "method_analysis" for task in tasks):
-            method_compound_patterns = [
-                "总结方法",
-                "概括方法",
-                "分析方法",
-                "方法和",
-                "方法与",
-                "方法及",
-                "方法以及",
-                "方法、",
-                "方法，",
-                "方法；",
-            ]
-            if any(pattern in question for pattern in method_compound_patterns):
-                add_task("method_analysis", "方法分析", question.find("方法"), "方法")
-
-        explicit_overview_phrases = [
-            "总结文章",
-            "总结全文",
-            "总结论文",
-            "总结这篇",
-            "总结这份",
-            "概括文章",
-            "概括全文",
-            "概括论文",
-            "文章内容",
-            "主要内容",
-            "总体概括",
-            "整体概括",
-        ]
-        has_explicit_overview = any(phrase in question for phrase in explicit_overview_phrases)
-        filtered_tasks: list[ParsedTask] = []
-        for task in tasks:
-            if task.task_type == "overview_summary" and task.trigger in {"总结", "概括"} and not has_explicit_overview:
-                nearby_text = question[task.position : task.position + 14]
-                if any(keyword in nearby_text for keyword in ["方法", "不足", "局限", "参考文献", "结论", "可靠", "风险"]):
-                    continue
-            filtered_tasks.append(task)
-        tasks = filtered_tasks
-
-        tasks.sort(key=lambda task: (task.position, task.task_type))
-        unique: list[ParsedTask] = []
-        seen: set[str] = set()
-        for task in tasks:
-            if task.task_type in seen:
-                continue
-            seen.add(task.task_type)
-            unique.append(task)
-        return unique
-
-    def _task_parse_reason(self, tasks: list[ParsedTask]) -> str:
-        if len(tasks) < 2:
-            return ""
-        detail = "、".join(f"{task.label}({task.trigger})" for task in tasks)
-        return f"检测到 {len(tasks)} 个任务目标，按用户文本出现顺序执行：{detail}。"
-
-    def _looks_like_compound_request(self, question: str) -> bool:
-        tasks = self._parse_compound_tasks(question)
-        if len(tasks) >= 2:
-            return True
-        enumeration_pattern = r"(第一|第二|第三|首先|其次|再次|最后|①|②|③|[（(]?\d+[）).、]|[一二三四五六七八九十][、.])"
-        return len(tasks) >= 1 and len(re.findall(enumeration_pattern, question)) >= 2
-
     def _classify_question_intent(self, question: str) -> str:
-        if self._looks_like_compound_request(question):
-            return "compound_request"
-        if self._looks_like_structured_review_request(question):
-            return "structured_review_request"
         if self._looks_like_reference_question(question):
             return "reference_question"
         if self._looks_like_field_lookup_question(question):
             return "field_lookup_question"
         if self._looks_like_compare_question(question):
             return "compare_question"
-        if self._looks_like_title_alignment_question(question):
-            return "title_alignment_question"
-        if self._looks_like_reliability_question(question):
-            return "reliability_question"
-        if self._looks_like_research_limitation_question(question):
-            return "research_limitation_question"
         if self._looks_like_document_wide_question(question):
             return "document_wide_question"
         if self._looks_like_meta_question(question):
             return "meta_question"
         return "specific_question"
 
+    def _parse_compound_tasks(self, question: str) -> list[ParsedTask]:
+        return []
+
+    def _task_parse_reason(self, tasks: list[ParsedTask]) -> str:
+        return ""
+
     def _retrieval_strategy_for_question(self, question: str) -> str:
-        if self._looks_like_compound_request(question):
-            return "compound_request"
-        if self._looks_like_structured_review_request(question):
-            return "structured_review"
         if self._looks_like_reference_question(question):
             return "reference_section"
         if self._looks_like_field_lookup_question(question):
             return "field_lookup"
         if self._looks_like_compare_question(question):
             return "comparison_overview"
-        if self._looks_like_title_alignment_question(question):
-            return "title_alignment"
-        if self._looks_like_reliability_question(question):
-            return "reliability_check"
-        if self._looks_like_research_limitation_question(question):
-            return "research_limitation"
-        if self._looks_like_document_wide_question(question):
+        if (
+            self._looks_like_document_wide_question(question)
+        ):
             return "document_overview"
         if self._looks_like_meta_question(question):
             return "no_retrieval"
@@ -591,14 +401,9 @@ class AgentPlanningMixin:
 
     def _friendly_intent(self, intent: str) -> str:
         labels = {
-            "compound_request": "复合任务",
             "reference_question": "参考文献问题",
             "field_lookup_question": "字段提取问题",
-            "structured_review_request": "结构化阅读报告任务",
             "compare_question": "多文档对比问题",
-            "title_alignment_question": "题目-结论匹配问题",
-            "reliability_question": "可靠性判断问题",
-            "research_limitation_question": "文章研究局限问题",
             "document_wide_question": "整篇概括/分析问题",
             "meta_question": "使用说明问题",
             "specific_question": "具体内容问答",
@@ -607,23 +412,17 @@ class AgentPlanningMixin:
 
     def _friendly_retrieval_strategy(self, strategy: str) -> str:
         labels = {
-            "compound_request": "复合任务检索",
             "reference_section": "参考文献区检索",
             "field_lookup": "字段精确提取",
-            "structured_review": "结构化阅读报告检索",
             "comparison_overview": "多文档概览检索",
-            "title_alignment": "题目与结论专项检索",
-            "reliability_check": "可靠性专项检索",
-            "research_limitation": "文章研究局限检索",
             "document_overview": "整篇文档重点检索",
             "vector_similarity": "向量相似度检索",
-            "hybrid_soft": "软意图混合检索",
-            "hybrid_reference": "参考文献混合检索",
-            "hybrid_field_lookup": "字段混合检索",
-            "hybrid_comparison": "对比混合检索",
-            "hybrid_judgment": "判断类混合检索",
-            "hybrid_limitation": "局限类混合检索",
-            "hybrid_overview": "全文概括混合检索",
+            "hybrid_soft": "Dense + BM25 + RRF",
+            "hybrid_reference": "参考文献候选 + 双路召回 + RRF",
+            "hybrid_field_lookup": "字段候选 + 双路召回 + RRF",
+            "hybrid_comparison": "对比候选 + 双路召回 + RRF",
+            "hybrid_overview": "全文概括双路召回 + RRF",
+            "hybrid_retry": "扩大范围后的双路召回 + RRF",
             "no_retrieval": "不检索文档",
         }
         return labels.get(strategy, strategy)
@@ -901,48 +700,9 @@ class AgentPlanningMixin:
     def _needs_opening_context(self, question: str) -> bool:
         return any(word in question for word in ["概括", "总结", "讲了什么", "讲啥", "讲了啥", "写了啥", "写的啥", "说了啥", "主要内容", "大意", "一句话", "目的", "主题", "能学到", "学到什么", "收获", "启发"])
 
-    def _looks_like_research_limitation_question(self, question: str) -> bool:
-        if "局限性" in question:
-            return True
-        return any(word in question for word in ["局限", "不足", "短板", "缺陷"]) and any(
-            subject in question
-            for subject in ["文章", "论文", "研究", "文档", "报告", "原文", "这篇", "这份", "它"]
-        )
-
     def _looks_like_compare_question(self, question: str) -> bool:
         keywords = ["对比", "比较", "不同点", "差异", "区别", "有什么不同", "哪里不同"]
         return any(keyword in question for keyword in keywords)
-
-    def _looks_like_structured_review_request(self, question: str) -> bool:
-        format_keywords = [
-            "先总结",
-            "先概括",
-            "总结概括",
-            "再详细分析",
-            "详细分析",
-            "每一部分",
-            "每个部分",
-            "最后告诉我",
-            "最后判断",
-            "最后评价",
-            "用这个模板",
-            "按照这个模板",
-            "按这个模板",
-            "模板来回答",
-            "按这个格式",
-            "分部分",
-        ]
-        has_format_request = any(keyword in question for keyword in format_keywords)
-        has_multi_step_words = sum(
-            1
-            for keyword in ["先", "再", "然后", "最后", "模板", "每一部分", "详细分析", "总结"]
-            if keyword in question
-        ) >= 2
-        has_review_goal = any(
-            keyword in question
-            for keyword in ["论文", "文档", "报告", "可靠性", "可靠吗", "能学到", "分析"]
-        )
-        return has_review_goal and (has_format_request or has_multi_step_words)
 
     def _looks_like_reference_question(self, question: str) -> bool:
         normalized = question.lower().strip()
@@ -1064,46 +824,4 @@ class AgentPlanningMixin:
             "date": "日期",
             "title": "标题",
         }.get(field, field)
-
-    def _looks_like_title_alignment_question(self, question: str) -> bool:
-        keywords = [
-            "支撑题目",
-            "支撑标题",
-            "支持题目",
-            "支持标题",
-            "能不能支撑",
-            "能否支撑",
-            "是否支撑",
-            "结论和题目",
-            "结论与题目",
-            "结论跟题目",
-            "题文相符",
-            "扣题",
-            "偏题",
-            "跑题",
-            "题目相符",
-            "标题相符",
-        ]
-        return any(keyword in question for keyword in keywords)
-
-    def _looks_like_reliability_question(self, question: str) -> bool:
-        explicit_keywords = [
-            "结果可靠吗",
-            "结论可靠吗",
-            "可靠吗",
-            "靠不靠谱",
-            "靠谱不",
-            "可信",
-            "能信",
-            "是否成立",
-            "站得住脚",
-            "准确吗",
-            "准不准",
-        ]
-        if any(keyword in question for keyword in explicit_keywords):
-            return True
-        return "可靠" in question and any(
-            subject in question
-            for subject in ["结果", "结论", "论文", "报告", "文档", "数据", "这篇", "这份"]
-        )
 

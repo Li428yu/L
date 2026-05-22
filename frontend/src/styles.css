@@ -1031,6 +1031,7 @@ mark {
 .teaching-metrics strong {
   color: var(--accent);
   font-size: 20px;
+  overflow-wrap: anywhere;
 }
 
 .trace-table {

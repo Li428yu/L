@@ -913,7 +913,7 @@ function EvidenceViewer({
         <strong>{document?.file_name || evidence.paper_name}</strong>
       </div>
       <p className="source-meta">
-        {isPdf ? `第 ${evidence.page} 页` : `第 ${evidence.page} 段附近`}
+        {isPdf ? `第 ${evidencePageLabel(evidence)} 页` : `第 ${evidencePageLabel(evidence)} 段附近`}
         {evidence.section ? ` · ${evidence.section}` : ""}
       </p>
       <p className="evidence-caption">核心证据句</p>
@@ -1077,13 +1077,8 @@ function SettingsPanel({
 
 function intentLabel(value?: string) {
   const labels: Record<string, string> = {
-    compound_request: "复合任务",
     reference_question: "参考文献问题",
-    structured_review_request: "结构化阅读报告任务",
     compare_question: "多文档对比问题",
-    title_alignment_question: "题目-结论匹配问题",
-    reliability_question: "可靠性判断问题",
-    research_limitation_question: "文章研究局限问题",
     document_wide_question: "整篇概括/分析问题",
     meta_question: "使用说明问题",
     specific_question: "具体内容问答"
@@ -1093,22 +1088,16 @@ function intentLabel(value?: string) {
 
 function retrievalStrategyLabel(value?: string) {
   const labels: Record<string, string> = {
-    compound_request: "复合任务检索",
     reference_section: "参考文献区检索",
-    structured_review: "结构化阅读报告检索",
     comparison_overview: "多文档概览检索",
-    title_alignment: "题目与结论专项检索",
-    reliability_check: "可靠性专项检索",
-    research_limitation: "文章研究局限检索",
     document_overview: "整篇文档重点检索",
     vector_similarity: "向量相似度检索",
-    hybrid_soft: "软意图混合检索",
-    hybrid_reference: "参考文献混合检索",
-    hybrid_field_lookup: "字段混合检索",
-    hybrid_comparison: "对比混合检索",
-    hybrid_judgment: "判断类混合检索",
-    hybrid_limitation: "局限类混合检索",
-    hybrid_overview: "全文概括混合检索",
+    hybrid_soft: "Dense + BM25 + RRF",
+    hybrid_reference: "参考文献候选 + 双路召回 + RRF",
+    hybrid_field_lookup: "字段候选 + 双路召回 + RRF",
+    hybrid_comparison: "对比候选 + 双路召回 + RRF",
+    hybrid_overview: "全文概括双路召回 + RRF",
+    hybrid_retry: "扩大范围后的双路检索 + RRF",
     no_retrieval: "不检索文档"
   };
   return value ? labels[value] || value : "待运行";
@@ -1116,13 +1105,8 @@ function retrievalStrategyLabel(value?: string) {
 
 function answerStrategyLabel(value?: string) {
   const labels: Record<string, string> = {
-    local_compound_answer: "按用户顺序逐项回答复合任务",
     local_reference_answer: "本地规则整理参考文献",
     local_field_lookup_answer: "本地规则提取指定字段",
-    local_structured_review_answer: "本地规则生成结构化阅读报告",
-    local_title_alignment_answer: "本地规则判断题目匹配",
-    local_reliability_answer: "本地规则判断可靠性",
-    local_research_limitation_answer: "本地规则分析文章研究局限",
     local_compare_answer: "本地规则对比多文档",
     local_document_answer: "本地规则概括文档",
     missing_evidence_refusal: "证据不足，拒绝硬答",
@@ -1271,6 +1255,14 @@ function TeachingPanel({
             <strong>{trace?.retrieved_count ?? "待检索"}</strong>
           </div>
           <div>
+            <span>检索管线</span>
+            <strong>{trace?.retrieval_pipeline || "待检索"}</strong>
+          </div>
+          <div>
+            <span>排序方式</span>
+            <strong>{trace?.ranking_method || "待检索"}</strong>
+          </div>
+          <div>
             <span>筛选文档</span>
             <strong>{filteredDocumentCount || "全部/待定"}</strong>
           </div>
@@ -1283,7 +1275,12 @@ function TeachingPanel({
                   {item.citation_id} · chunk {item.chunk_id}
                 </strong>
                 <span>score：{formatScore(item.score)}</span>
-                <span>page：{item.page}</span>
+                <span>来源：{scoreSourceLabel(item.score_source)}</span>
+                <span>vector：{formatOptionalScore(item.vector_score)}</span>
+                <span>BM25：{formatOptionalScore(item.sparse_score)}</span>
+                <span>rule：{formatOptionalScore(item.rule_score)}</span>
+                <span>RRF：{formatOptionalScore(item.rrf_score)}</span>
+                <span>page：{evidencePageLabel(item)}</span>
                 <span>section：{item.section || "Unknown"}</span>
                 <small className="hit-reason">命中原因：{item.reason}</small>
                 <div className="debug-tags">
@@ -1320,8 +1317,14 @@ function TeachingPanel({
                 <span>embedding：{friendlyEmbeddingLabel(document.embedding_model)}</span>
                 {document.chunk_strategy ? (
                   <>
-                    <span>chunk_size：{document.chunk_strategy.chunk_size}</span>
-                    <span>overlap：{document.chunk_strategy.overlap}</span>
+                    <span>chunk_size：{document.chunk_strategy.chunk_size} {document.chunk_strategy.size_unit || ""}</span>
+                    <span>overlap：{document.chunk_strategy.overlap} {document.chunk_strategy.size_unit || ""}</span>
+                    {document.chunk_strategy.parent_chunk_size ? (
+                      <span>parent chunk：{document.chunk_strategy.parent_chunk_size} {document.chunk_strategy.size_unit || ""}</span>
+                    ) : null}
+                    {document.chunk_strategy.token_count ? (
+                      <span>token 数：{document.chunk_strategy.token_count}</span>
+                    ) : null}
                     <span>splitter：{document.chunk_strategy.splitter}</span>
                     <span>语言：{document.chunk_strategy.language}</span>
                     <small>切分理由：{document.chunk_strategy.reasons.join("；")}</small>
@@ -1565,6 +1568,12 @@ function evidenceLabel(item: EvidenceItem): string {
   return `证据 ${item.citation_id.replace("E", "")}`;
 }
 
+function evidencePageLabel(item: { page: number; page_start?: number | null; page_end?: number | null }): string {
+  const pageStart = item.page_start || item.page;
+  const pageEnd = item.page_end || pageStart;
+  return pageEnd && pageEnd !== pageStart ? `${pageStart}-${pageEnd}` : String(pageStart || item.page || 0);
+}
+
 function humanDocumentStatus(status: string): string {
   const labels: Record<string, string> = {
     queued: "等待准备",
@@ -1580,6 +1589,22 @@ function formatScore(score: number): string {
     return "未知";
   }
   return score.toFixed(3);
+}
+
+function formatOptionalScore(score?: number | null): string {
+  return typeof score === "number" && Number.isFinite(score) ? score.toFixed(3) : "--";
+}
+
+function scoreSourceLabel(value?: string): string {
+  const labels: Record<string, string> = {
+    vector: "向量",
+    bm25_sparse: "BM25",
+    rule: "规则",
+    field_rule: "字段规则",
+    rule_boost: "规则加权",
+    rrf_fusion: "RRF"
+  };
+  return value ? labels[value] || value : "未知";
 }
 
 function formatPercent(value: number): string {

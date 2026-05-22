@@ -9,6 +9,10 @@ export interface ChunkStrategy {
   page_count: number;
   paragraph_count: number;
   char_count: number;
+  token_count?: number;
+  size_unit?: string;
+  parent_chunk_size?: number;
+  parent_overlap?: number;
   reasons: string[];
 }
 
@@ -50,14 +54,25 @@ export interface EvidenceItem {
   document_id: string;
   paper_name: string;
   page: number;
+  page_start?: number | null;
+  page_end?: number | null;
   section?: string | null;
   source: string;
   file_hash: string;
   score: number;
+  vector_score?: number | null;
+  sparse_score?: number | null;
+  rule_score?: number | null;
+  rrf_score?: number | null;
+  final_score?: number | null;
+  score_source?: string;
   text: string;
   quote: string;
   char_start?: number | null;
   char_end?: number | null;
+  token_count?: number | null;
+  chunk_type?: string;
+  parent_id?: string | null;
 }
 
 export interface RuntimeStep {
@@ -70,8 +85,16 @@ export interface RetrievalDebugItem {
   citation_id: string;
   chunk_id: string;
   page: number;
+  page_start?: number | null;
+  page_end?: number | null;
   section?: string | null;
   score: number;
+  vector_score?: number | null;
+  sparse_score?: number | null;
+  rule_score?: number | null;
+  rrf_score?: number | null;
+  final_score?: number | null;
+  score_source?: string;
   retrieval_strategy: string;
   selected_by: string;
   matched_keywords: string[];
@@ -113,6 +136,8 @@ export interface RagTrace {
   final_prompt_evidence: string[];
   intent?: string;
   retrieval_strategy?: string;
+  retrieval_pipeline?: string;
+  ranking_method?: string;
   answer_strategy?: string;
   fallback_used?: boolean;
   evidence_quality?: string;

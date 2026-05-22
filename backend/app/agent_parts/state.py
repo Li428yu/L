@@ -27,6 +27,9 @@ class PaperAgentState(TypedDict, total=False):
     fallback_used: bool
     evidence_quality: str
     diagnosis: str
+    retrieval_attempts: int
+    retrieval_pipeline: str
+    ranking_method: str
     soft_intent: dict[str, Any]
     compound_tasks: list[str]
     task_parse_reason: str
