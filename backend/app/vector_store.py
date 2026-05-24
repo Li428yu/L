@@ -65,6 +65,9 @@ class ChromaPaperStore:
                     "parent_char_start": chunk.parent_char_start,
                     "parent_char_end": chunk.parent_char_end,
                     "parent_token_count": chunk.parent_token_count,
+                    "image_id": chunk.image_id,
+                    "image_path": chunk.image_path,
+                    "bbox_json": chunk.bbox_json,
                     "embedding_model": embedding_model,
                 }
                 for chunk in chunks
@@ -122,6 +125,9 @@ class ChromaPaperStore:
                     token_count=int(metadata.get("token_count", 0) or 0),
                     chunk_type=str(metadata.get("chunk_type") or "text"),
                     parent_id=str(metadata.get("parent_id") or "") or None,
+                    image_id=str(metadata.get("image_id") or "") or None,
+                    image_path=str(metadata.get("image_path") or "") or None,
+                    bbox_json=str(metadata.get("bbox_json") or "") or None,
                 )
             )
         return [self._expand_evidence_context(item) for item in evidence]

@@ -161,3 +161,8 @@ export function documentFileUrl(documentId: string, page?: number): string {
   }
   return `${API_BASE}/api/documents/${documentId}/file#page=${page}`;
 }
+
+export function evidenceImageUrl(documentId: string, imageId: string, thumbnail = false): string {
+  const suffix = thumbnail ? "?thumbnail=true" : "";
+  return `${API_BASE}/api/documents/${documentId}/images/${encodeURIComponent(imageId)}/file${suffix}`;
+}

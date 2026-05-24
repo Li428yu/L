@@ -92,6 +92,51 @@ class MetadataStore:
                     updated_at text not null,
                     unique(conversation_id, key)
                 );
+
+                create table if not exists memory_items (
+                    id text primary key,
+                    conversation_id text not null,
+                    memory_type text not null,
+                    key text not null,
+                    value text not null,
+                    source text not null,
+                    source_message_id integer,
+                    confidence real not null default 1.0,
+                    access_count integer not null default 0,
+                    enabled integer not null default 1,
+                    last_used_at text,
+                    created_at text not null,
+                    updated_at text not null,
+                    unique(conversation_id, memory_type, key)
+                );
+
+                create table if not exists conversation_summaries (
+                    conversation_id text primary key,
+                    summary text not null,
+                    covered_message_count integer not null default 0,
+                    created_at text not null,
+                    updated_at text not null
+                );
+
+                create table if not exists document_images (
+                    id text primary key,
+                    document_id text not null,
+                    image_hash text not null,
+                    page_start integer not null,
+                    page_end integer not null,
+                    bbox_json text not null,
+                    image_path text not null,
+                    thumbnail_path text not null,
+                    width integer not null,
+                    height integer not null,
+                    kind text not null,
+                    ocr_text text not null,
+                    vision_summary text not null,
+                    caption_text text not null,
+                    status text not null,
+                    created_at text not null,
+                    updated_at text not null
+                );
                 """
             )
 
@@ -223,6 +268,7 @@ class MetadataStore:
 
     def delete_document(self, document_id: str) -> None:
         with self.connect() as conn:
+            conn.execute("delete from document_images where document_id = ?", (document_id,))
             conn.execute("delete from documents where id = ?", (document_id,))
 
     def create_task(self, *, document_id: str | None, message: str) -> TaskInfo:
@@ -324,6 +370,8 @@ class MetadataStore:
         with self.connect() as conn:
             conn.execute("delete from messages where conversation_id = ?", (conversation_id,))
             conn.execute("delete from memory_facts where conversation_id = ?", (conversation_id,))
+            conn.execute("delete from memory_items where conversation_id = ?", (conversation_id,))
+            conn.execute("delete from conversation_summaries where conversation_id = ?", (conversation_id,))
             conn.execute("delete from conversations where id = ?", (conversation_id,))
 
     def save_message(
@@ -333,9 +381,9 @@ class MetadataStore:
         role: str,
         content: str,
         evidence: list[dict[str, Any]] | None = None,
-    ) -> None:
+    ) -> int:
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 insert into messages (conversation_id, role, content, evidence_json, created_at)
                 values (?, ?, ?, ?, ?)
@@ -348,6 +396,7 @@ class MetadataStore:
                     utc_now(),
                 ),
             )
+            return int(cursor.lastrowid)
 
     def get_recent_messages(self, conversation_id: str, limit: int = 12) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -379,6 +428,156 @@ class MetadataStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_latest_messages(self, conversation_id: str, limit: int = 80) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select id, conversation_id, role, content, evidence_json, created_at
+                from messages
+                where conversation_id = ?
+                order by id desc
+                limit ?
+                """,
+                (conversation_id, limit),
+            ).fetchall()
+        items = [dict(row) for row in rows]
+        items.reverse()
+        return items
+
+    def count_messages(self, conversation_id: str) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                "select count(*) as count from messages where conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def upsert_memory_item(
+        self,
+        *,
+        conversation_id: str,
+        memory_type: str,
+        key: str,
+        value: str,
+        source: str = "rule",
+        source_message_id: int | None = None,
+        confidence: float = 1.0,
+        enabled: bool = True,
+    ) -> None:
+        now = utc_now()
+        item_id = new_id("mem")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into memory_items (
+                    id, conversation_id, memory_type, key, value, source,
+                    source_message_id, confidence, enabled, last_used_at,
+                    created_at, updated_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(conversation_id, memory_type, key) do update set
+                    value = excluded.value,
+                    source = excluded.source,
+                    source_message_id = coalesce(excluded.source_message_id, memory_items.source_message_id),
+                    confidence = max(memory_items.confidence, excluded.confidence),
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    item_id,
+                    conversation_id,
+                    memory_type,
+                    key,
+                    value,
+                    source,
+                    source_message_id,
+                    float(max(0.0, min(confidence, 1.0))),
+                    1 if enabled else 0,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+
+    def list_memory_items(
+        self,
+        conversation_id: str,
+        *,
+        enabled_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        where_enabled = "and enabled = 1" if enabled_only else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                select *
+                from memory_items
+                where conversation_id = ? {where_enabled}
+                order by
+                    case memory_type
+                        when 'profile' then 0
+                        when 'preference' then 1
+                        when 'goal' then 2
+                        when 'task_state' then 3
+                        else 4
+                    end,
+                    updated_at desc
+                """,
+                (conversation_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def touch_memory_items(self, item_ids: list[str]) -> None:
+        if not item_ids:
+            return
+        placeholders = ",".join("?" for _ in item_ids)
+        with self.connect() as conn:
+            conn.execute(
+                f"""
+                update memory_items
+                set access_count = access_count + 1,
+                    last_used_at = ?,
+                    updated_at = ?
+                where id in ({placeholders})
+                """,
+                (utc_now(), utc_now(), *item_ids),
+            )
+
+    def get_conversation_summary(self, conversation_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "select * from conversation_summaries where conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_conversation_summary(
+        self,
+        *,
+        conversation_id: str,
+        summary: str,
+        covered_message_count: int,
+    ) -> None:
+        now = utc_now()
+        with self.connect() as conn:
+            existing = conn.execute(
+                "select created_at from conversation_summaries where conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            created_at = existing["created_at"] if existing else now
+            conn.execute(
+                """
+                insert into conversation_summaries (
+                    conversation_id, summary, covered_message_count, created_at, updated_at
+                )
+                values (?, ?, ?, ?, ?)
+                on conflict(conversation_id) do update set
+                    summary = excluded.summary,
+                    covered_message_count = excluded.covered_message_count,
+                    updated_at = excluded.updated_at
+                """,
+                (conversation_id, summary, covered_message_count, created_at, now),
+            )
+
     def upsert_memory_fact(
         self,
         *,
@@ -401,14 +600,78 @@ class MetadataStore:
                 """,
                 (fact_id, conversation_id, key, value, scope, now, now),
             )
+        self.upsert_memory_item(
+            conversation_id=conversation_id,
+            memory_type="profile" if key == "user_profile" else "preference",
+            key=key,
+            value=value,
+            source="legacy_fact",
+            confidence=1.0,
+        )
 
     def list_memory_facts(self, conversation_id: str) -> dict[str, str]:
+        memory_items = self.list_memory_items(conversation_id)
+        facts = {str(row["key"]): str(row["value"]) for row in memory_items}
         with self.connect() as conn:
             rows = conn.execute(
                 "select key, value from memory_facts where conversation_id = ?",
                 (conversation_id,),
             ).fetchall()
-        return {str(row["key"]): str(row["value"]) for row in rows}
+        legacy_facts = {str(row["key"]): str(row["value"]) for row in rows}
+        return {**legacy_facts, **facts}
+
+    def replace_document_images(
+        self,
+        *,
+        document_id: str,
+        images: list[dict[str, Any]],
+    ) -> None:
+        now = utc_now()
+        with self.connect() as conn:
+            conn.execute("delete from document_images where document_id = ?", (document_id,))
+            for image in images:
+                conn.execute(
+                    """
+                    insert into document_images (
+                        id, document_id, image_hash, page_start, page_end, bbox_json,
+                        image_path, thumbnail_path, width, height, kind, ocr_text,
+                        vision_summary, caption_text, status, created_at, updated_at
+                    )
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        image["id"],
+                        document_id,
+                        image["image_hash"],
+                        int(image["page_start"]),
+                        int(image["page_end"]),
+                        image.get("bbox_json", "{}"),
+                        image.get("image_path", ""),
+                        image.get("thumbnail_path", ""),
+                        int(image.get("width", 0) or 0),
+                        int(image.get("height", 0) or 0),
+                        image.get("kind", "image"),
+                        image.get("ocr_text", ""),
+                        image.get("vision_summary", ""),
+                        image.get("caption_text", ""),
+                        image.get("status", "stored"),
+                        now,
+                        now,
+                    ),
+                )
+
+    def list_document_images(self, document_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select *
+                from document_images
+                where document_id = ?
+                order by page_start asc, id asc
+                """,
+                (document_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def _row_to_document(self, row: sqlite3.Row) -> DocumentInfo:
         data = dict(row)

@@ -56,6 +56,18 @@ class UploadResponse(BaseModel):
     task: TaskInfo
 
 
+class RelatedImageInfo(BaseModel):
+    id: str
+    document_id: str
+    page_start: int
+    page_end: int
+    kind: str
+    caption_text: str = ""
+    ocr_text: str = ""
+    vision_summary: str = ""
+    status: str = ""
+
+
 class EvidenceItem(BaseModel):
     citation_id: str
     chunk_id: str
@@ -81,6 +93,10 @@ class EvidenceItem(BaseModel):
     token_count: int | None = None
     chunk_type: str = "text"
     parent_id: str | None = None
+    image_id: str | None = None
+    image_path: str | None = None
+    bbox_json: str | None = None
+    related_images: list[RelatedImageInfo] = Field(default_factory=list)
 
 
 class RuntimeStep(BaseModel):
@@ -204,6 +220,26 @@ class ChunkPreview(BaseModel):
     chunk_type: str = "text"
     token_count: int | None = None
     text: str
+
+
+class DocumentImageInfo(BaseModel):
+    id: str
+    document_id: str
+    image_hash: str
+    page_start: int
+    page_end: int
+    bbox_json: str
+    image_path: str
+    thumbnail_path: str
+    width: int
+    height: int
+    kind: str
+    ocr_text: str
+    vision_summary: str
+    caption_text: str
+    status: str
+    created_at: str
+    updated_at: str
 
 
 class EvaluationCase(BaseModel):

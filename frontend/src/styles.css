@@ -779,6 +779,44 @@ mark {
   overflow-wrap: anywhere;
 }
 
+.evidence-image-preview {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px;
+  background: #fafbf8;
+}
+
+.evidence-image-preview img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.evidence-image-preview figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.evidence-image-preview figcaption span {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.related-evidence-images {
+  margin: 14px 0;
+}
+
+.related-evidence-images .evidence-caption {
+  margin-top: 0;
+}
+
 .source-context-details {
   margin: 10px 0 14px;
   border-radius: 16px;

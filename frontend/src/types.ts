@@ -48,6 +48,18 @@ export interface UploadResponse {
   task: TaskInfo;
 }
 
+export interface RelatedImageInfo {
+  id: string;
+  document_id: string;
+  page_start: number;
+  page_end: number;
+  kind: string;
+  caption_text?: string;
+  ocr_text?: string;
+  vision_summary?: string;
+  status?: string;
+}
+
 export interface EvidenceItem {
   citation_id: string;
   chunk_id: string;
@@ -73,6 +85,10 @@ export interface EvidenceItem {
   token_count?: number | null;
   chunk_type?: string;
   parent_id?: string | null;
+  image_id?: string | null;
+  image_path?: string | null;
+  bbox_json?: string | null;
+  related_images?: RelatedImageInfo[];
 }
 
 export interface RuntimeStep {

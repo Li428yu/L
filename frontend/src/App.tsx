@@ -5,6 +5,7 @@ import {
   deleteConversation,
   deleteDocument,
   documentFileUrl,
+  evidenceImageUrl,
   getConversation,
   getModels,
   getTask,
@@ -888,7 +889,9 @@ function EvidenceViewer({
   documents: DocumentInfo[];
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const evidenceKey = evidence ? `${evidence.document_id}:${evidence.chunk_id}:${evidence.page}` : "";
+  const evidenceKey = evidence
+    ? `${evidence.document_id}:${evidence.chunk_id}:${evidence.page}:${evidence.image_id || ""}`
+    : "";
 
   useEffect(() => {
     setPreviewOpen(false);
@@ -905,6 +908,9 @@ function EvidenceViewer({
 
   const document = documents.find((item) => item.id === evidence.document_id);
   const isPdf = document?.file_name.toLowerCase().endsWith(".pdf");
+  const isImageEvidence = Boolean(evidence.image_id) || Boolean(evidence.chunk_type?.includes("image"));
+  const imageUrl = evidence.image_id ? evidenceImageUrl(evidence.document_id, evidence.image_id) : "";
+  const relatedImages = (evidence.related_images || []).filter((image) => image.id !== evidence.image_id);
 
   return (
     <section className="source-card">
@@ -918,6 +924,30 @@ function EvidenceViewer({
       </p>
       <p className="evidence-caption">核心证据句</p>
       <mark>{coreEvidenceText(evidence)}</mark>
+      {isImageEvidence && imageUrl && (
+        <figure className="evidence-image-preview">
+          <img src={imageUrl} alt={`Evidence ${evidence.citation_id}`} loading="lazy" />
+          <figcaption>
+            {evidence.chunk_type || "image"} · Page {evidencePageLabel(evidence)}
+          </figcaption>
+        </figure>
+      )}
+      {relatedImages.length > 0 && (
+        <div className="related-evidence-images">
+          <p className="evidence-caption">同页相关图片</p>
+          {relatedImages.map((image) => (
+            <figure className="evidence-image-preview" key={image.id}>
+              <img src={evidenceImageUrl(image.document_id, image.id)} alt={`Related image ${image.id}`} loading="lazy" />
+              <figcaption>
+                {image.kind || "image"} · Page {imagePageLabel(image)}
+                {image.caption_text || image.ocr_text || image.vision_summary ? (
+                  <span>{image.caption_text || image.ocr_text || image.vision_summary}</span>
+                ) : null}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
       <details className="source-context-details">
         <summary>展开上下文</summary>
         <p className="source-text">{maskSensitiveText(evidence.text)}</p>
@@ -1572,6 +1602,12 @@ function evidencePageLabel(item: { page: number; page_start?: number | null; pag
   const pageStart = item.page_start || item.page;
   const pageEnd = item.page_end || pageStart;
   return pageEnd && pageEnd !== pageStart ? `${pageStart}-${pageEnd}` : String(pageStart || item.page || 0);
+}
+
+function imagePageLabel(item: { page_start: number; page_end?: number | null }): string {
+  const pageStart = item.page_start || 0;
+  const pageEnd = item.page_end || pageStart;
+  return pageEnd && pageEnd !== pageStart ? `${pageStart}-${pageEnd}` : String(pageStart);
 }
 
 function humanDocumentStatus(status: string): string {

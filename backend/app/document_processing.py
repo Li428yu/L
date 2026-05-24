@@ -72,6 +72,9 @@ class ChunkRecord:
     parent_char_start: int = 0
     parent_char_end: int = 0
     parent_token_count: int = 0
+    image_id: str = ""
+    image_path: str = ""
+    bbox_json: str = ""
 
 
 def compute_file_hash(file_bytes: bytes) -> str:

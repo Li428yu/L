@@ -21,7 +21,7 @@ from backend.app.agent_parts.verification import AgentVerificationMixin
 from backend.app.config import Settings
 from backend.app.llm_clients import ModelClients
 from backend.app.memory import MemoryManager
-from backend.app.models import AskRequest, AskResponse, EvidenceItem, RagTrace, RuntimeStep
+from backend.app.models import AskRequest, AskResponse, EvidenceItem, RagTrace, RelatedImageInfo, RuntimeStep
 from backend.app.storage import MetadataStore
 from backend.app.vector_store import ChromaPaperStore
 
@@ -128,7 +128,9 @@ class PaperAgentService(
     ) -> AskResponse:
         evidence = state.get("evidence", [])
         answer = state.get("answer", "本轮没有生成可用回答。")
-        visible_evidence = self._visible_evidence_for_answer(answer, evidence)
+        visible_evidence = self.attach_related_images(
+            self._visible_evidence_for_answer(answer, evidence)
+        )
         runtime = state.get("runtime", [])
         final_prompt_evidence = state.get("final_prompt_evidence", [])
         evidence_judgments = state.get("evidence_judgments", [])
@@ -167,7 +169,7 @@ class PaperAgentService(
         )
 
         conversation_id = state["conversation_id"]
-        self.store.save_message(
+        user_message_id = self.store.save_message(
             conversation_id=conversation_id,
             role="user",
             content=request.question,
@@ -178,6 +180,12 @@ class PaperAgentService(
             content=answer,
             evidence=[item.model_dump() for item in visible_evidence],
         )
+        self.memory.remember_from_user_text(
+            conversation_id,
+            request.question,
+            source_message_id=user_message_id,
+        )
+        self.memory.refresh_conversation_summary(conversation_id)
 
         return AskResponse(
             answer=answer,
@@ -206,7 +214,7 @@ class PaperAgentService(
                 evidence_judgments=evidence_judgments,
                 verification=verification,
             ),
-            memory_used=self.memory.build_memory_context(conversation_id),
+            memory_used=self.memory.build_memory_context(conversation_id, question=request.question),
         )
 
     def _visible_evidence_for_answer(
@@ -218,6 +226,60 @@ class PaperAgentService(
         if not cited_ids:
             return []
         return [item for item in evidence if item.citation_id in cited_ids]
+
+    def attach_related_images(self, evidence: list[EvidenceItem]) -> list[EvidenceItem]:
+        if not evidence:
+            return []
+        image_cache: dict[str, list[dict[str, Any]]] = {}
+        enriched: list[EvidenceItem] = []
+        for item in evidence:
+            document_id = item.document_id
+            if not document_id:
+                enriched.append(item)
+                continue
+            if document_id not in image_cache:
+                image_cache[document_id] = self.store.list_document_images(document_id)
+            related = self._related_images_for_evidence(item, image_cache[document_id])
+            enriched.append(item.model_copy(update={"related_images": related}))
+        return enriched
+
+    def _related_images_for_evidence(
+        self,
+        item: EvidenceItem,
+        images: list[dict[str, Any]],
+        *,
+        limit: int = 6,
+    ) -> list[RelatedImageInfo]:
+        page_start = int(item.page_start or item.page or 0)
+        page_end = int(item.page_end or page_start)
+        if not page_start:
+            return []
+
+        related: list[RelatedImageInfo] = []
+        for image in images:
+            image_id = str(image.get("id", ""))
+            if item.image_id and image_id == item.image_id:
+                continue
+            image_start = int(image.get("page_start", 0) or 0)
+            image_end = int(image.get("page_end", image_start) or image_start)
+            if image_end < page_start or image_start > page_end:
+                continue
+            related.append(
+                RelatedImageInfo(
+                    id=image_id,
+                    document_id=str(image.get("document_id", item.document_id)),
+                    page_start=image_start,
+                    page_end=image_end,
+                    kind=str(image.get("kind") or "image"),
+                    caption_text=str(image.get("caption_text") or ""),
+                    ocr_text=str(image.get("ocr_text") or ""),
+                    vision_summary=str(image.get("vision_summary") or ""),
+                    status=str(image.get("status") or ""),
+                )
+            )
+            if len(related) >= limit:
+                break
+        return related
 
     def _resolve_chat_model(self, requested_model: str | None, preset_model: str) -> str:
         options = set(self.settings.chat_model_options)
@@ -271,7 +333,10 @@ class PaperAgentService(
 
     def _load_memory(self, state: PaperAgentState) -> PaperAgentState:
         self._emit_status("正在读取记忆...")
-        facts = self.memory.build_memory_context(state["conversation_id"])
+        facts = self.memory.build_memory_context(
+            state["conversation_id"],
+            question=state["question"],
+        )
         recent_messages = self.store.get_recent_messages(state["conversation_id"], limit=10)
         return {
             **state,
@@ -291,7 +356,10 @@ class PaperAgentService(
     def _write_memory(self, state: PaperAgentState) -> PaperAgentState:
         self._emit_status("正在更新记忆...")
         remembered = self.memory.remember_from_user_text(state["conversation_id"], state["question"])
-        facts = self.memory.build_memory_context(state["conversation_id"])
+        facts = self.memory.build_memory_context(
+            state["conversation_id"],
+            question=state["question"],
+        )
         detail = (
             f"本轮识别并写入 {len(remembered)} 条新画像/偏好；长期记忆当前共有 {len(facts)} 条。"
             if remembered

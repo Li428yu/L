@@ -85,6 +85,10 @@ class Settings:
         return self.resolved_data_dir / "uploads"
 
     @property
+    def images_dir(self) -> Path:
+        return self.resolved_data_dir / "images"
+
+    @property
     def chroma_dir(self) -> Path:
         return self.resolved_data_dir / "chroma"
 
@@ -153,6 +157,7 @@ class Settings:
     def ensure_dirs(self) -> None:
         self.resolved_data_dir.mkdir(parents=True, exist_ok=True)
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.images_dir.mkdir(parents=True, exist_ok=True)
         self.chroma_dir.mkdir(parents=True, exist_ok=True)
 
 

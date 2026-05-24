@@ -23,6 +23,7 @@ from backend.app.models import (
     ConversationInfo,
     ConversationMessage,
     DocumentInfo,
+    DocumentImageInfo,
     EvidenceItem,
     EvaluationRun,
     ModelCatalog,
@@ -172,13 +173,14 @@ def get_conversation(conversation_id: str) -> ConversationDetail:
                 evidence_payload = json.loads(row["evidence_json"])
             except json.JSONDecodeError:
                 evidence_payload = []
+        evidence_items = [EvidenceItem.model_validate(item) for item in evidence_payload]
         messages.append(
             ConversationMessage(
                 id=int(row["id"]),
                 conversation_id=str(row["conversation_id"]),
                 role=str(row["role"]),
                 content=str(row["content"]),
-                evidence=[EvidenceItem.model_validate(item) for item in evidence_payload],
+                evidence=agent.attach_related_images(evidence_items),
                 created_at=str(row["created_at"]),
             )
         )
@@ -262,6 +264,40 @@ def preview_chunks(document_id: str) -> list[ChunkPreview]:
         )
         for row in rows
     ]
+
+
+@app.get("/api/documents/{document_id}/images", response_model=list[DocumentImageInfo])
+def list_document_images(document_id: str) -> list[DocumentImageInfo]:
+    document = store.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="document_not_found")
+    return [DocumentImageInfo(**row) for row in store.list_document_images(document_id)]
+
+
+@app.get("/api/documents/{document_id}/images/{image_id}/file")
+def get_document_image_file(
+    document_id: str,
+    image_id: str,
+    thumbnail: bool = False,
+) -> FileResponse:
+    document = store.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="document_not_found")
+    image = next(
+        (row for row in store.list_document_images(document_id) if str(row["id"]) == image_id),
+        None,
+    )
+    if not image:
+        raise HTTPException(status_code=404, detail="image_not_found")
+
+    selected_path = str(image.get("thumbnail_path") or "") if thumbnail else ""
+    if not selected_path:
+        selected_path = str(image.get("image_path") or "")
+    path = Path(selected_path).resolve()
+    image_root = settings.images_dir.resolve()
+    if not path.exists() or not path.is_relative_to(image_root):
+        raise HTTPException(status_code=404, detail="image_file_not_found")
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/api/documents/{document_id}/file")

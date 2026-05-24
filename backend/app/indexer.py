@@ -11,6 +11,7 @@ from backend.app.document_processing import (
     safe_upload_name,
     split_pages_into_chunks,
 )
+from backend.app.image_processing import extract_pdf_images, image_records_to_chunks
 from backend.app.llm_clients import ModelClients
 from backend.app.models import ChunkStrategy, DocumentInfo
 from backend.app.storage import MetadataStore
@@ -76,7 +77,35 @@ class DocumentIndexer:
             source_path = Path(document.source_path)
             pages = extract_document_text(source_path)
             text_pages = [page for page in pages if page.text.strip()]
-            if not text_pages:
+            image_chunks = []
+            if source_path.suffix.lower() == ".pdf":
+                current_stage = "images"
+                if self._stop_if_document_deleted(task_id=task_id, document_id=document.id):
+                    return
+                self.store.update_task(
+                    task_id,
+                    stage="images",
+                    status="running",
+                    progress=0.24,
+                    message="Extracting PDF images and image text.",
+                )
+                images = extract_pdf_images(
+                    pdf_path=source_path,
+                    output_dir=self.settings.images_dir / document.id,
+                    document_id=document.id,
+                )
+                self.store.replace_document_images(
+                    document_id=document.id,
+                    images=[image.to_storage_dict() for image in images],
+                )
+                image_chunks = image_records_to_chunks(
+                    images=images,
+                    document_id=document.id,
+                    paper_name=document.file_name,
+                    source=document.source_path,
+                    file_hash=document.file_hash,
+                )
+            if not text_pages and not image_chunks:
                 raise ValueError("没有读取到可用文字。扫描版 PDF 需要先做 OCR，空白 DOCX 也无法索引。")
 
             current_stage = "chunk"
@@ -89,7 +118,7 @@ class DocumentIndexer:
                 progress=0.32,
                 message="正在按文档结构自动整理段落。",
             )
-            strategy = choose_chunk_strategy(text_pages)
+            strategy = choose_chunk_strategy(text_pages or pages)
             chunks = split_pages_into_chunks(
                 pages=text_pages,
                 document_id=document.id,
@@ -98,6 +127,7 @@ class DocumentIndexer:
                 source=document.source_path,
                 strategy=strategy,
             )
+            chunks.extend(image_chunks)
             if not chunks:
                 raise ValueError("文档文字太少或结构异常，没有生成可检索的段落。")
 
@@ -137,7 +167,7 @@ class DocumentIndexer:
                 task_id=task_id,
                 document=document,
                 status="ready",
-                page_count=len(text_pages),
+                page_count=len(pages),
                 chunk_count=len(chunks),
                 embedding_model=embedding_result.provider,
                 chunk_strategy=strategy,
