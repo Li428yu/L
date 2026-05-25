@@ -39,6 +39,20 @@ def _chat_api_base_url() -> str | None:
     return os.getenv("CHAT_API_BASE_URL") or os.getenv("DEEPSEEK_API_BASE_URL") or os.getenv("API_BASE_URL")
 
 
+def _vision_api_key() -> str | None:
+    return os.getenv("VISION_API_KEY") or os.getenv("ARK_API_KEY")
+
+
+def _vision_api_base_url() -> str | None:
+    explicit = os.getenv("VISION_API_BASE_URL") or os.getenv("ARK_API_BASE_URL")
+    if explicit:
+        return explicit
+    vision_api_type = os.getenv("VISION_API_TYPE", "").strip().lower()
+    if vision_api_type in {"ark_responses", "responses", "openai_responses"}:
+        return "https://ark.cn-beijing.volces.com/api/v3"
+    return None
+
+
 @dataclass(frozen=True)
 class ResolvedModelPreset:
     id: str
@@ -73,6 +87,18 @@ class Settings:
     model_timeout_seconds: float = float(os.getenv("MODEL_TIMEOUT_SECONDS", "20"))
     model_max_retries: int = int(os.getenv("MODEL_MAX_RETRIES", "1"))
     force_model_answer: bool = _bool_env("FORCE_MODEL_ANSWER", False)
+    vision_model: str = os.getenv("VISION_MODEL", os.getenv("LLM_MODEL", "gpt-4.1-mini"))
+    vision_api_key: str | None = _vision_api_key()
+    vision_api_base_url: str | None = _vision_api_base_url()
+    vision_api_type: str = os.getenv("VISION_API_TYPE", "openai_chat").strip().lower()
+    enable_vision_analysis: bool = _bool_env("ENABLE_VISION_ANALYSIS", False)
+    max_vision_images: int = int(os.getenv("MAX_VISION_IMAGES", "40"))
+    langfuse_enabled: bool = _bool_env("LANGFUSE_ENABLED", False)
+    langfuse_public_key: str | None = os.getenv("LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str | None = os.getenv("LANGFUSE_SECRET_KEY")
+    langfuse_host: str | None = os.getenv("LANGFUSE_HOST")
+    enable_llm_judge: bool = _bool_env("ENABLE_LLM_JUDGE", True)
+    judge_model: str = os.getenv("JUDGE_MODEL", os.getenv("LLM_MODEL", "gpt-4.1-mini"))
 
     @property
     def resolved_data_dir(self) -> Path:
@@ -95,6 +121,14 @@ class Settings:
     @property
     def sqlite_path(self) -> Path:
         return self.resolved_data_dir / "assistant.sqlite3"
+
+    @property
+    def observability_dir(self) -> Path:
+        return self.resolved_data_dir / "observability"
+
+    @property
+    def eval_results_dir(self) -> Path:
+        return self.resolved_data_dir / "eval_runs"
 
     @property
     def chat_model_options(self) -> list[str]:
@@ -159,6 +193,8 @@ class Settings:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
         self.images_dir.mkdir(parents=True, exist_ok=True)
         self.chroma_dir.mkdir(parents=True, exist_ok=True)
+        self.observability_dir.mkdir(parents=True, exist_ok=True)
+        self.eval_results_dir.mkdir(parents=True, exist_ok=True)
 
 
 settings = Settings()

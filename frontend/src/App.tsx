@@ -1,5 +1,7 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties, MouseEvent } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   askPaperStream,
   deleteConversation,
@@ -934,7 +936,7 @@ function EvidenceViewer({
       )}
       {relatedImages.length > 0 && (
         <div className="related-evidence-images">
-          <p className="evidence-caption">同页相关图片</p>
+          <p className="evidence-caption">相关图片证据</p>
           {relatedImages.map((image) => (
             <figure className="evidence-image-preview" key={image.id}>
               <img src={evidenceImageUrl(image.document_id, image.id)} alt={`Related image ${image.id}`} loading="lazy" />
@@ -1208,6 +1210,19 @@ function TeachingPanel({
         <strong>{trace?.diagnosis || "等待一次真实问答后显示诊断。"}</strong>
       </div>
 
+      {trace?.visual_ocr_warnings?.length ? (
+        <div className="question-card">
+          <span>图片/OCR 提醒</span>
+          <strong>{trace.visual_ocr_warnings[0].message}</strong>
+          {trace.visual_ocr_warnings.slice(1, 4).map((warning) => (
+            <small key={`${warning.type}-${warning.document_id || warning.message}`}>
+              {warning.paper_name ? `${warning.paper_name}：` : ""}
+              {warning.message}
+            </small>
+          ))}
+        </div>
+      ) : null}
+
       <div className="diagnostic-grid">
         <div>
           <span>问题类型</span>
@@ -1415,136 +1430,194 @@ function renderAnswerWithCitations(
   evidence: EvidenceItem[],
   onPick: (item: EvidenceItem) => void
 ) {
-  const normalized = normalizeAnswerMarkdown(answer);
-  const blocks = parseMarkdownBlocks(normalized);
+  const normalized = withEvidenceCitationLinks(normalizeAnswerMarkdown(answer));
   return (
     <div className="answer-markdown">
-      {blocks.map((block, index) => renderMarkdownBlock(block, index, evidence, onPick))}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h3>{children}</h3>,
+          h2: ({ children }) => <h3>{children}</h3>,
+          h3: ({ children }) => <h3>{children}</h3>,
+          h4: ({ children }) => <h4>{children}</h4>,
+          h5: ({ children }) => <h4>{children}</h4>,
+          h6: ({ children }) => <h4>{children}</h4>,
+          table: ({ children }) => (
+            <div className="markdown-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
+          a: ({ href, children }) => {
+            const citationId = href?.match(/^#evidence-(E\d+)$/)?.[1];
+            if (citationId) {
+              const item = evidence.find((candidate) => candidate.citation_id === citationId);
+              if (!item) {
+                return <span className="inline-citation muted">{children}</span>;
+              }
+              return (
+                <button className="inline-citation" onClick={() => onPick(item)} type="button">
+                  {evidenceLabel(item)}
+                </button>
+              );
+            }
+            return (
+              <a href={href} target="_blank" rel="noreferrer">
+                {children}
+              </a>
+            );
+          }
+        }}
+      >
+        {normalized}
+      </ReactMarkdown>
     </div>
   );
 }
 
-type MarkdownBlock =
-  | { type: "heading"; level: 2 | 3; text: string }
-  | { type: "paragraph"; text: string }
-  | { type: "list"; ordered: boolean; items: string[] };
-
 function normalizeAnswerMarkdown(answer: string): string {
-  return answer
+  return repairBrokenMarkdownTables(answer
     .replace(/\r\n/g, "\n")
     .replace(/\[(?:Introduction|Conclusion|Abstract|Methods?|Results?|Discussion|Unknown)依据\]/gi, "")
     .replace(/(?:Introduction|Conclusion|Abstract|Methods?|Results?|Discussion|Unknown)依据/gi, "")
-    .replace(/([^\n])\n(?=(?:[-*]\s+|\d+[.、]\s+|#{1,3}\s+))/g, "$1\n\n")
+    .replace(/([^\n])\n(?=(?:[-*]\s+|\d+[.、]\s+|#{1,6}\s+))/g, "$1\n\n")
+  )
     .trim();
 }
 
-function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
-  const lines = markdown.split("\n");
-  const blocks: MarkdownBlock[] = [];
-  let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
-
-  function flushParagraph() {
-    const text = paragraph.join(" ").replace(/\s+/g, " ").trim();
-    if (text) {
-      blocks.push({ type: "paragraph", text });
-    }
-    paragraph = [];
-  }
-
-  function flushList() {
-    if (list?.items.length) {
-      blocks.push({ type: "list", ordered: list.ordered, items: list.items });
-    }
-    list = null;
-  }
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      blocks.push({ type: "heading", level: heading[1].length === 1 ? 2 : 3, text: heading[2].trim() });
-      continue;
-    }
-
-    const unorderedItem = line.match(/^[-*]\s+(.+)$/);
-    const orderedItem = line.match(/^\d+[.、]\s+(.+)$/);
-    if (unorderedItem || orderedItem) {
-      flushParagraph();
-      const ordered = Boolean(orderedItem);
-      if (!list || list.ordered !== ordered) {
-        flushList();
-        list = { ordered, items: [] };
+function repairBrokenMarkdownTables(markdown: string): string {
+  const expandedRows = markdown.replace(/\s*\|\|\s*/g, "|\n|");
+  return expandedRows
+    .split("\n")
+    .flatMap((rawLine) => {
+      const line = rawLine.trim();
+      const headingWithTable = line.match(/^(#{1,6}\s+[^|]+?)\s+(\|.+)$/);
+      if (headingWithTable && (headingWithTable[2].match(/\|/g)?.length || 0) >= 3) {
+        return [headingWithTable[1].trim(), ...repairCollapsedTableLine(headingWithTable[2].trim())];
       }
-      list.items.push((unorderedItem?.[1] || orderedItem?.[1] || "").trim());
-      continue;
-    }
-
-    flushList();
-    paragraph.push(line);
-  }
-
-  flushParagraph();
-  flushList();
-  return blocks;
+      return repairCollapsedTableLine(rawLine);
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
-function renderMarkdownBlock(
-  block: MarkdownBlock,
-  index: number,
-  evidence: EvidenceItem[],
-  onPick: (item: EvidenceItem) => void
-) {
-  if (block.type === "heading") {
-    const HeadingTag = block.level === 2 ? "h3" : "h4";
-    return <HeadingTag key={`heading-${index}`}>{renderInlineMarkdown(block.text, evidence, onPick)}</HeadingTag>;
+function repairCollapsedTableLine(rawLine: string): string[] {
+  const line = rawLine.trim();
+  const pipeCount = line.match(/\|/g)?.length || 0;
+  if (pipeCount < 7 || !line.includes("|") || !hasMarkdownSeparatorCell(line)) {
+    return [rawLine];
   }
-  if (block.type === "list") {
-    const ListTag = block.ordered ? "ol" : "ul";
-    return (
-      <ListTag key={`list-${index}`}>
-        {block.items.map((item, itemIndex) => (
-          <li key={`item-${index}-${itemIndex}`}>{renderInlineMarkdown(item, evidence, onPick)}</li>
-        ))}
-      </ListTag>
-    );
+
+  const boundaryTable = normalizePipeTableRows(tableRowsFromBoundaryCells(line));
+  if (boundaryTable) {
+    return boundaryTable;
   }
-  return <p key={`paragraph-${index}`}>{renderInlineMarkdown(block.text, evidence, onPick)}</p>;
+
+  return normalizePipeTableRows(tableRowsFromColumnChunks(line)) || [rawLine];
 }
 
-function renderInlineMarkdown(
-  text: string,
-  evidence: EvidenceItem[],
-  onPick: (item: EvidenceItem) => void
-): ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|\[E\d+\])/g).filter(Boolean);
-  return parts.map((part, index) => {
-    const citation = part.match(/^\[E(\d+)\]$/);
-    if (citation) {
-      const item = evidence.find((candidate) => candidate.citation_id === `E${citation[1]}`);
-      if (!item) {
-        return <Fragment key={`${part}-${index}`}>{part}</Fragment>;
+function hasMarkdownSeparatorCell(line: string): boolean {
+  return line
+    .split("|")
+    .some((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function tableRowsFromBoundaryCells(line: string): string[][] {
+  const parts = line.split("|");
+  const rows: string[][] = [];
+  let row: string[] = [];
+
+  parts.forEach((part, index) => {
+    const cell = part.trim();
+    const edgeCell = cell === "" && (index === 0 || index === parts.length - 1);
+    if (edgeCell) {
+      return;
+    }
+    if (cell === "") {
+      if (row.length) {
+        rows.push(row);
+        row = [];
       }
-      return (
-        <button className="inline-citation" key={`${part}-${index}`} onClick={() => onPick(item)}>
-          {evidenceLabel(item)}
-        </button>
-      );
+      return;
     }
-    const bold = part.match(/^\*\*(.+)\*\*$/);
-    if (bold) {
-      return <strong key={`${part}-${index}`}>{renderInlineMarkdown(bold[1], evidence, onPick)}</strong>;
-    }
-    return <Fragment key={`${part}-${index}`}>{part}</Fragment>;
+    row.push(cell);
   });
+
+  if (row.length) {
+    rows.push(row);
+  }
+  return rows;
+}
+
+function tableRowsFromColumnChunks(line: string): string[][] {
+  const cells = line
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter(Boolean);
+  const separatorIndex = cells.findIndex((cell) => /^:?-{3,}:?$/.test(cell));
+  if (separatorIndex < 2) {
+    return [];
+  }
+
+  let columnCount = 0;
+  for (let index = separatorIndex; index < cells.length; index += 1) {
+    if (!/^:?-{3,}:?$/.test(cells[index])) {
+      break;
+    }
+    columnCount += 1;
+  }
+  if (columnCount < 2 || separatorIndex !== columnCount) {
+    return [];
+  }
+
+  const rows = [
+    cells.slice(0, columnCount),
+    cells.slice(separatorIndex, separatorIndex + columnCount)
+  ];
+  for (let index = separatorIndex + columnCount; index < cells.length; index += columnCount) {
+    rows.push(cells.slice(index, index + columnCount));
+  }
+  return rows;
+}
+
+function normalizePipeTableRows(rows: string[][]): string[] | null {
+  const separatorIndex = rows.findIndex((row) => row.length >= 2 && row.every((cell) => /^:?-{3,}:?$/.test(cell)));
+  if (separatorIndex !== 1 || rows.length < 3) {
+    return null;
+  }
+  const columnCount = rows[0].length;
+  if (columnCount < 2 || rows[1].length !== columnCount) {
+    return null;
+  }
+
+  const normalizedRows = rows
+    .filter((row, index) => index <= 1 || row.some((cell) => cell.trim()))
+    .map((row) => normalizeTableRowLength(row, columnCount));
+  if (normalizedRows.length < 3) {
+    return null;
+  }
+
+  return [
+    `| ${normalizedRows[0].join(" | ")} |`,
+    `| ${Array.from({ length: columnCount }, () => "---").join(" | ")} |`,
+    ...normalizedRows.slice(2).map((row) => `| ${row.join(" | ")} |`)
+  ];
+}
+
+function normalizeTableRowLength(row: string[], columnCount: number): string[] {
+  if (row.length === columnCount) {
+    return row;
+  }
+  if (row.length < columnCount) {
+    return [...row, ...Array.from({ length: columnCount - row.length }, () => "")];
+  }
+  return [
+    ...row.slice(0, columnCount - 1),
+    row.slice(columnCount - 1).join(" | ")
+  ];
+}
+
+function withEvidenceCitationLinks(markdown: string): string {
+  return markdown.replace(/\[E(\d+)\]/g, (_match, number: string) => `[证据 ${number}](#evidence-E${number})`);
 }
 
 function renderEvidenceActions(message: ChatMessage, onPick: (item: EvidenceItem) => void) {

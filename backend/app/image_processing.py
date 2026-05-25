@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import re
+import zipfile
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
+import xml.etree.ElementTree as ET
 
 import fitz
 
@@ -13,9 +18,17 @@ from backend.app.document_processing import ChunkRecord, count_tokens
 
 
 CAPTION_PATTERN = re.compile(
-    r"\b(?:fig(?:ure)?\.?|table)\s*\d*|[\u56fe\u8868]\s*[\d\uff11-\uff19一二三四五六七八九十]+",
+    r"\b(?:fig(?:ure)?\.?|table)\s*\d*|[图表]\s*[\d１-９一二三四五六七八九十]+",
     re.IGNORECASE,
 )
+
+DOCX_NAMESPACES = {
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "v": "urn:schemas-microsoft-com:vml",
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+}
+RELATIONSHIP_NAMESPACE = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
 
 @dataclass
@@ -152,6 +165,108 @@ def extract_pdf_images(
     return images
 
 
+def extract_docx_images(
+    *,
+    docx_path: Path,
+    output_dir: Path,
+    document_id: str,
+    max_images: int = 300,
+    max_ocr_images: int = 40,
+) -> list[ExtractedImage]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    images: list[ExtractedImage] = []
+    ocr_cache: dict[str, str] = {}
+    image_counter = 0
+
+    with zipfile.ZipFile(docx_path) as package:
+        for part_name in _docx_content_parts(package):
+            if image_counter >= max_images:
+                break
+            relationships = _docx_relationships(package, part_name)
+            if not relationships:
+                continue
+            records = _docx_paragraph_records(package, part_name, relationships)
+            for record_index, record in enumerate(records):
+                if image_counter >= max_images:
+                    break
+                for image_ref in record["image_refs"]:
+                    if image_counter >= max_images:
+                        break
+                    image_bytes = _docx_image_bytes(package, image_ref["path"])
+                    if not image_bytes:
+                        continue
+                    saved = _save_docx_image_as_png(
+                        image_bytes=image_bytes,
+                        output_dir=output_dir,
+                        page=int(record["page"]),
+                        image_index=image_counter,
+                    )
+                    if saved is None:
+                        continue
+                    image_path, width, height, rendered = saved
+                    image_hash = hashlib.sha256(rendered).hexdigest()
+                    final_path = output_dir / f"docx_p{int(record['page']):04d}_{image_counter:04d}_{image_hash[:12]}.png"
+                    if image_path != final_path:
+                        if final_path.exists():
+                            image_path.unlink(missing_ok=True)
+                        else:
+                            image_path.replace(final_path)
+                        image_path = final_path
+
+                    caption_text = _caption_near_docx_record(records, record_index)
+                    if image_hash in ocr_cache:
+                        ocr_text = ocr_cache[image_hash]
+                    elif len(ocr_cache) < max_ocr_images and _should_ocr_docx_image(
+                        width=width,
+                        height=height,
+                        caption_text=caption_text,
+                    ):
+                        ocr_text = _ocr_image(image_path)
+                        ocr_cache[image_hash] = ocr_text
+                    else:
+                        ocr_text = ""
+
+                    kind = _classify_image(caption_text=caption_text, ocr_text=ocr_text)
+                    vision_summary = _fallback_vision_summary(
+                        page=int(record["page"]),
+                        caption_text=caption_text,
+                        ocr_text=ocr_text,
+                        kind=kind,
+                    )
+                    status = "ready" if caption_text or ocr_text else "stored_needs_ocr"
+                    bbox_json = json.dumps(
+                        {
+                            "docx_part": part_name,
+                            "paragraph_index": record_index,
+                            "relationship_id": image_ref["relationship_id"],
+                            "target": image_ref["path"],
+                            "logical_page": int(record["page"]),
+                        },
+                        ensure_ascii=False,
+                    )
+                    image = ExtractedImage(
+                        id=f"{document_id}_image_{image_counter:05d}",
+                        document_id=document_id,
+                        image_hash=image_hash,
+                        page_start=int(record["page"]),
+                        page_end=int(record["page"]),
+                        bbox=(0.0, 0.0, float(width), float(height)),
+                        image_path=str(image_path),
+                        thumbnail_path=_make_thumbnail(image_path),
+                        width=width,
+                        height=height,
+                        kind=kind,
+                        ocr_text=ocr_text,
+                        vision_summary=vision_summary,
+                        caption_text=caption_text,
+                        status=status,
+                        bbox_json_override=bbox_json,
+                    )
+                    images.append(image)
+                    image_counter += 1
+    return images
+
+
 def image_records_to_chunks(
     *,
     images: list[ExtractedImage],
@@ -191,6 +306,202 @@ def image_records_to_chunks(
     return chunks
 
 
+def _docx_content_parts(package: zipfile.ZipFile) -> list[str]:
+    names = set(package.namelist())
+    parts = ["word/document.xml"]
+    parts.extend(sorted(name for name in names if re.fullmatch(r"word/header\d+\.xml", name)))
+    parts.extend(sorted(name for name in names if re.fullmatch(r"word/footer\d+\.xml", name)))
+    return [part for part in parts if part in names]
+
+
+def _docx_relationships(package: zipfile.ZipFile, part_name: str) -> dict[str, str]:
+    rels_name = _docx_rels_name(part_name)
+    if rels_name not in package.namelist():
+        return {}
+    try:
+        root = ET.fromstring(package.read(rels_name))
+    except ET.ParseError:
+        return {}
+    relationships: dict[str, str] = {}
+    part_dir = posixpath.dirname(part_name)
+    for relationship in root.findall(f"{RELATIONSHIP_NAMESPACE}Relationship"):
+        relationship_id = str(relationship.attrib.get("Id", ""))
+        target = str(relationship.attrib.get("Target", ""))
+        rel_type = str(relationship.attrib.get("Type", ""))
+        if not relationship_id or not target or "image" not in rel_type.lower():
+            continue
+        relationships[relationship_id] = _resolve_docx_target(part_dir, target)
+    return relationships
+
+
+def _docx_rels_name(part_name: str) -> str:
+    part_dir = posixpath.dirname(part_name)
+    part_base = posixpath.basename(part_name)
+    return posixpath.join(part_dir, "_rels", f"{part_base}.rels")
+
+
+def _resolve_docx_target(part_dir: str, target: str) -> str:
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(posixpath.join(part_dir, target))
+
+
+def _docx_paragraph_records(
+    package: zipfile.ZipFile,
+    part_name: str,
+    relationships: dict[str, str],
+) -> list[dict[str, Any]]:
+    try:
+        root = ET.fromstring(package.read(part_name))
+    except ET.ParseError:
+        return []
+
+    records: list[dict[str, Any]] = []
+    current_page = 1
+    page_tokens = 0
+    for paragraph in root.findall(".//w:p", DOCX_NAMESPACES):
+        text = _docx_paragraph_text(paragraph)
+        image_refs = _docx_paragraph_image_refs(paragraph, relationships)
+        token_count = count_tokens(text) if text else 0
+        if text and page_tokens and page_tokens + token_count > 1200:
+            current_page += 1
+            page_tokens = 0
+        records.append(
+            {
+                "text": text,
+                "image_refs": image_refs,
+                "page": current_page,
+            }
+        )
+        page_tokens += token_count
+    return records
+
+
+def _docx_paragraph_text(paragraph: ET.Element) -> str:
+    parts = [
+        item.text or ""
+        for item in paragraph.findall(".//w:t", DOCX_NAMESPACES)
+        if item.text
+    ]
+    return " ".join("".join(parts).split())[:1200]
+
+
+def _docx_paragraph_image_refs(
+    paragraph: ET.Element,
+    relationships: dict[str, str],
+) -> list[dict[str, str]]:
+    relationship_ids: list[str] = []
+    for blip in paragraph.findall(".//a:blip", DOCX_NAMESPACES):
+        relationship_id = blip.attrib.get(f"{{{DOCX_NAMESPACES['r']}}}embed") or blip.attrib.get(
+            f"{{{DOCX_NAMESPACES['r']}}}link"
+        )
+        if relationship_id and relationship_id not in relationship_ids:
+            relationship_ids.append(relationship_id)
+    for image_data in paragraph.findall(".//v:imagedata", DOCX_NAMESPACES):
+        relationship_id = image_data.attrib.get(f"{{{DOCX_NAMESPACES['r']}}}id")
+        if relationship_id and relationship_id not in relationship_ids:
+            relationship_ids.append(relationship_id)
+
+    refs: list[dict[str, str]] = []
+    for relationship_id in relationship_ids:
+        target = relationships.get(relationship_id)
+        if not target:
+            continue
+        refs.append({"relationship_id": relationship_id, "path": target})
+    return refs
+
+
+def _docx_image_bytes(package: zipfile.ZipFile, image_path: str) -> bytes:
+    if image_path not in package.namelist():
+        return b""
+    try:
+        return package.read(image_path)
+    except Exception:
+        return b""
+
+
+def _save_docx_image_as_png(
+    *,
+    image_bytes: bytes,
+    output_dir: Path,
+    page: int,
+    image_index: int,
+) -> tuple[Path, int, int, bytes] | None:
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            normalized = image.convert("RGBA") if image.mode in {"P", "LA", "RGBA"} else image.convert("RGB")
+            output_path = output_dir / f"docx_p{page:04d}_{image_index:04d}_pending.png"
+            normalized.save(output_path, format="PNG")
+            rendered = output_path.read_bytes()
+            return output_path, int(normalized.width), int(normalized.height), rendered
+    except Exception:
+        return None
+
+
+def _caption_near_docx_record(records: list[dict[str, Any]], record_index: int) -> str:
+    candidates: list[str] = []
+    search_indexes = [record_index, record_index + 1, record_index - 1, record_index + 2, record_index - 2]
+    for index in search_indexes:
+        if index < 0 or index >= len(records):
+            continue
+        text = str(records[index].get("text", "")).strip()
+        if text and CAPTION_PATTERN.search(text):
+            candidates.append(text)
+    if candidates:
+        return " ".join(dict.fromkeys(candidates))[:900]
+
+    nearby: list[str] = []
+    for index in [record_index - 1, record_index, record_index + 1]:
+        if index < 0 or index >= len(records):
+            continue
+        text = str(records[index].get("text", "")).strip()
+        if text:
+            nearby.append(text)
+    if nearby:
+        return f"Nearby text: {' '.join(nearby)[:760]}"
+    return ""
+
+
+def _should_ocr_docx_image(*, width: int, height: int, caption_text: str) -> bool:
+    if caption_text:
+        return True
+    return width >= 360 and height >= 180
+
+
+def enrich_images_with_vision(
+    *,
+    images: list[ExtractedImage],
+    analyze_image: Callable[[Path, str], str],
+    max_images: int = 40,
+) -> list[ExtractedImage]:
+    analyzed = 0
+    for image in images:
+        if analyzed >= max_images:
+            break
+        if not _should_analyze_image_with_vision(image):
+            continue
+        path = Path(image.image_path)
+        if not path.exists():
+            continue
+        prompt = _vision_prompt_for_image(image)
+        try:
+            summary = analyze_image(path, prompt)
+        except Exception:
+            continue
+        summary = _clean_vision_summary(summary)
+        if not summary:
+            continue
+        image.vision_summary = summary
+        image.status = "vision_ready"
+        image.kind = _classify_image(caption_text=image.caption_text, ocr_text=f"{image.ocr_text} {summary}")
+        analyzed += 1
+    return images
+
+
 def _safe_bbox(value: Any) -> tuple[float, float, float, float] | None:
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         return None
@@ -201,6 +512,44 @@ def _safe_bbox(value: Any) -> tuple[float, float, float, float] | None:
     if x1 <= x0 or y1 <= y0:
         return None
     return (x0, y0, x1, y1)
+
+
+def _should_analyze_image_with_vision(image: ExtractedImage) -> bool:
+    if not image.image_path:
+        return False
+    if image.kind in {"figure_image", "chart_image", "table_image", "cross_page_image"}:
+        return True
+    if image.status == "stored_needs_ocr":
+        return True
+    if image.caption_text and not image.ocr_text:
+        return True
+    return False
+
+
+def _vision_prompt_for_image(image: ExtractedImage) -> str:
+    return f"""
+请观察这张论文中的图片，输出简洁中文结构化说明。只基于图片本身、题注和 OCR，不要猜测论文外的信息。
+
+已知上下文：
+- 页码：{image.page_start}-{image.page_end}
+- 初步类型：{image.kind}
+- 题注：{image.caption_text or "无"}
+- OCR：{image.ocr_text or "无"}
+
+请包含：
+1. 图片实际内容是什么。
+2. 如果是图表，说明坐标轴/表头/变量、主要趋势或差异。
+3. 这张图最可能支持的论文事实。
+4. 如果图片文字很少或看不清，请明确说不确定。
+""".strip()
+
+
+def _clean_vision_summary(text: str) -> str:
+    cleaned = " ".join(str(text).split())
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned[:2200]
 
 
 def _should_skip_image_bbox(bbox: tuple[float, float, float, float], page_rect: fitz.Rect) -> bool:
@@ -297,9 +646,9 @@ def _make_thumbnail(image_path: Path) -> str:
 
 def _classify_image(*, caption_text: str, ocr_text: str) -> str:
     text = f"{caption_text} {ocr_text}".lower()
-    if re.search(r"\btable\b|[\u8868]\s*[\d\uff11-\uff19一二三四五六七八九十]+", text):
+    if re.search(r"\btable\b|表\s*[\d１-９一二三四五六七八九十]+", text):
         return "table_image"
-    if re.search(r"\bfig(?:ure)?\b|[\u56fe]\s*[\d\uff11-\uff19一二三四五六七八九十]+", text):
+    if re.search(r"\bfig(?:ure)?\b|图\s*[\d１-９一二三四五六七八九十]+", text):
         return "figure_image"
     if len(re.findall(r"\d", text)) >= 12:
         return "chart_image"

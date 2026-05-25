@@ -442,7 +442,9 @@ class AgentVerificationMixin:
         }
 
     def _citation_ids_from_answer(self, answer: str) -> list[str]:
-        return [f"E{value}" for value in dict.fromkeys(re.findall(r"\[E(\d+)\]", answer))]
+        bracketed = re.findall(r"\[E(\d+)\]", answer)
+        bare = re.findall(r"(?<![A-Za-z0-9])E(\d+)(?![A-Za-z0-9])", answer)
+        return [f"E{value}" for value in dict.fromkeys([*bracketed, *bare])]
 
     def _sentences_with_citations(self, answer: str) -> list[tuple[str, list[str]]]:
         sentences = [
@@ -460,14 +462,99 @@ class AgentVerificationMixin:
     def _sentence_evidence_overlap(self, sentence: str, evidence_text: str) -> float:
         sentence_text = re.sub(r"\[E\d+\]", "", self._sanitize_evidence_text(sentence))
         evidence_text = self._sanitize_evidence_text(evidence_text)
-        meaningful_chars = [
-            char
-            for char in re.findall(r"[\u4e00-\u9fff]", sentence_text)
-            if char not in set("这篇份个的了呢吗啊和与及或是在中里上下主要可以说明因此因为所以当前原文证据文章研究局限")
-        ]
-        if not meaningful_chars:
+        sentence_tokens = self._verification_overlap_tokens(sentence_text)
+        if not sentence_tokens:
             return 1.0
-        evidence_chars = set(re.findall(r"[\u4e00-\u9fff]", evidence_text))
-        hits = sum(1 for char in meaningful_chars if char in evidence_chars)
-        return hits / max(len(meaningful_chars), 1)
+        evidence_tokens = set(self._verification_overlap_tokens(evidence_text))
+        if not evidence_tokens:
+            return 0.0
+        hits = sum(1 for token in sentence_tokens if token in evidence_tokens)
+        return hits / max(len(sentence_tokens), 1)
+
+    def _verification_overlap_tokens(self, text: str) -> list[str]:
+        normalized = self._sanitize_evidence_text(text).lower()
+        blocked_chars = set("这篇份个的了呢吗啊和与及或是在中里上下主要可以说明因此因为所以当前原文证据文章研究局限")
+        blocked_words = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "this",
+            "that",
+            "are",
+            "was",
+            "were",
+            "can",
+            "may",
+            "into",
+            "using",
+        }
+        tokens: list[str] = [
+            char
+            for char in re.findall(r"[\u4e00-\u9fff]", normalized)
+            if char not in blocked_chars
+        ]
+        tokens.extend(
+            token
+            for token in re.findall(r"[a-z0-9][a-z0-9\-]{2,}", normalized)
+            if token not in blocked_words
+        )
+        bilingual_aliases = {
+            "治理": "govern",
+            "映射": "map",
+            "测量": "measure",
+            "度量": "measure",
+            "衡量": "measure",
+            "管理": "manage",
+            "识别": "identify",
+            "防护": "protect",
+            "保护": "protect",
+            "检测": "detect",
+            "响应": "respond",
+            "恢复": "recover",
+            "可信": "trustworthy",
+            "风险": "risk",
+            "核心功能": "functions",
+            "功能": "function",
+            "特征": "characteristics",
+            "有效": "valid",
+            "可靠": "reliable",
+            "安全": "safe",
+            "弹性": "resilient",
+            "可问责": "accountable",
+            "透明": "transparent",
+            "可解释": "explainable",
+            "可解读": "interpretable",
+            "隐私": "privacy",
+            "公平": "fair",
+            "偏见": "bias",
+            "数据集": "dataset",
+            "训练集": "dataset",
+            "训练数据": "dataset",
+            "图像": "image",
+            "图片": "image",
+            "文本": "text",
+            "图像文本": "image-text",
+            "互联网": "internet",
+            "外部链接": "outbound links",
+            "抓取": "scraped",
+            "网页": "web",
+            "点赞": "karma",
+            "评分": "karma",
+            "掩码": "masks",
+            "分割": "segmentation",
+            "许可": "licensed",
+            "保护隐私": "privacy",
+            "隐私保护": "privacy",
+            "预训练": "pre-training",
+            "掩码语言模型": "masked language model",
+            "下一句预测": "next sentence prediction",
+            "目标": "objective",
+            "零样本": "zero-shot",
+        }
+        for phrase, alias in bilingual_aliases.items():
+            if phrase in normalized:
+                tokens.append(alias)
+        return list(dict.fromkeys(tokens))
 

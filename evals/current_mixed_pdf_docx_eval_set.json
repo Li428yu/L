@@ -1,0 +1,2006 @@
+{
+  "suite_name": "current_mixed_pdf_docx",
+  "description": "Mixed real PDF + DOCX regression suite covering framework papers, research papers, scanned PDFs, visual evidence, table evidence, multi-document relations, claim-level checks, and insufficient-evidence refusals.",
+  "cases": [
+    {
+      "id": "pdf_nist_ai_rmf_core_functions",
+      "question": "NIST AI RMF 1.0 \u7684\u6838\u5fc3\u529f\u80fd\u6709\u54ea\u4e9b\uff1f\u8bf7\u7ed9\u51fa\u8bc1\u636e\u3002",
+      "expected_answer": "\u5e94\u56de\u7b54 AI RMF 1.0 \u7684\u6838\u5fc3\u529f\u80fd\u662f Govern\u3001Map\u3001Measure\u3001Manage\uff0c\u5e76\u8bf4\u660e\u5b83\u4eec\u7528\u4e8e\u7ec4\u7ec7 AI \u98ce\u9669\u7ba1\u7406\u6d3b\u52a8\u3002",
+      "expected_document": "nist_ai_rmf_1_0.pdf",
+      "expected_pages": [
+        25
+      ],
+      "expected_keywords": [
+        "Govern",
+        "Map",
+        "Measure",
+        "Manage",
+        "AI RMF"
+      ],
+      "expected_evidence_keywords": [
+        "GOVERN",
+        "MAP",
+        "MEASURE",
+        "MANAGE"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5f15\u7528 NIST AI RMF 1.0 \u8bc1\u636e\uff0c\u4e0d\u80fd\u628a CSF \u7684\u516d\u4e2a\u529f\u80fd\u6df7\u5165\u3002"
+    },
+    {
+      "id": "pdf_nist_ai_rmf_trustworthy_characteristics",
+      "question": "NIST AI RMF 1.0 \u5982\u4f55\u63cf\u8ff0\u53ef\u4fe1 AI \u7684\u7279\u5f81\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u53ef\u4fe1 AI \u76f8\u5173\u7279\u5f81\u5305\u62ec valid and reliable\u3001safe\u3001secure and resilient\u3001accountable and transparent\u3001explainable and interpretable\u3001privacy-enhanced\u3001fair with harmful bias managed \u7b49\u3002",
+      "expected_document": "nist_ai_rmf_1_0.pdf",
+      "expected_pages": [
+        4,
+        8
+      ],
+      "expected_keywords": [
+        "valid and reliable",
+        "safe",
+        "secure and resilient",
+        "accountable",
+        "transparent",
+        "privacy",
+        "fair"
+      ],
+      "expected_evidence_keywords": [
+        "valid and reliable",
+        "safe",
+        "secure and resilient",
+        "accountable and transparent"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u57fa\u4e8e AI RMF \u539f\u6587\u5217\u51fa\u53ef\u4fe1 AI \u7279\u5f81\uff0c\u4e0d\u5f97\u6cdb\u6cdb\u8c08\u4f26\u7406\u3002"
+    },
+    {
+      "id": "pdf_nist_ai_rmf_lifecycle_visual",
+      "question": "NIST AI RMF 1.0 \u7684\u751f\u547d\u5468\u671f\u56fe\u5c55\u793a\u4e86\u4ec0\u4e48\uff1f\u8bf7\u53ea\u4f7f\u7528\u76f8\u5173\u56fe\u7247/\u89c6\u89c9\u8bc1\u636e\u3002",
+      "expected_answer": "\u5e94\u57fa\u4e8e\u56fe\u7247/\u89c6\u89c9\u6458\u8981\u8bf4\u660e AI \u7cfb\u7edf\u751f\u547d\u5468\u671f\u548c\u5173\u952e\u7ef4\u5ea6\u56fe\uff0c\u6d89\u53ca AI \u7cfb\u7edf\u4ece\u8bbe\u8ba1\u3001\u5f00\u53d1\u3001\u90e8\u7f72\u3001\u4f7f\u7528\u548c\u5f71\u54cd\u76f8\u5173\u7ef4\u5ea6\u7684\u7ec4\u7ec7\u5316\u7406\u89e3\u3002",
+      "expected_document": "nist_ai_rmf_1_0.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "\u751f\u547d\u5468\u671f",
+        "AI system",
+        "Figure",
+        "dimensions",
+        "\u89c6\u89c9"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Summary",
+        "Lifecycle",
+        "AI System"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u4f7f\u7528\u56fe\u7247/\u89c6\u89c9\u8bc1\u636e\uff1b\u5982\u679c\u53ea\u5f15\u7528\u6b63\u6587\uff0c\u5e94\u964d\u4f4e visual_grounding\u3002"
+    },
+    {
+      "id": "pdf_nist_csf_core_functions",
+      "question": "NIST Cybersecurity Framework 2.0 \u7684\u6838\u5fc3\u529f\u80fd\u662f\u4ec0\u4e48\uff1f",
+      "expected_answer": "\u5e94\u56de\u7b54 CSF 2.0 \u7684\u6838\u5fc3\u529f\u80fd\u5305\u62ec Govern\u3001Identify\u3001Protect\u3001Detect\u3001Respond\u3001Recover\u3002",
+      "expected_document": "nist_cybersecurity_framework_2_0.pdf",
+      "expected_pages": [
+        7,
+        8
+      ],
+      "expected_keywords": [
+        "Govern",
+        "Identify",
+        "Protect",
+        "Detect",
+        "Respond",
+        "Recover"
+      ],
+      "expected_evidence_keywords": [
+        "GOVERN",
+        "IDENTIFY",
+        "PROTECT",
+        "DETECT",
+        "RESPOND",
+        "RECOVER"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5f15\u7528 CSF 2.0 \u8bc1\u636e\uff0c\u4e0d\u80fd\u628a AI RMF \u7684\u56db\u4e2a\u529f\u80fd\u5f53\u4f5c CSF \u529f\u80fd\u3002"
+    },
+    {
+      "id": "pdf_nist_csf_govern_role",
+      "question": "CSF 2.0 \u4e2d Govern \u529f\u80fd\u8d77\u4ec0\u4e48\u4f5c\u7528\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e Govern \u5173\u6ce8\u7ec4\u7ec7\u7684\u7f51\u7edc\u5b89\u5168\u98ce\u9669\u7ba1\u7406\u6218\u7565\u3001\u671f\u671b\u548c\u653f\u7b56\uff0c\u5e76\u4e3a\u5176\u4ed6\u529f\u80fd\u63d0\u4f9b\u6cbb\u7406\u57fa\u7840\u3002",
+      "expected_document": "nist_cybersecurity_framework_2_0.pdf",
+      "expected_pages": [
+        6,
+        7,
+        8
+      ],
+      "expected_keywords": [
+        "Govern",
+        "strategy",
+        "expectations",
+        "policy",
+        "cybersecurity risk"
+      ],
+      "expected_evidence_keywords": [
+        "GOVERN",
+        "strategy",
+        "expectations",
+        "policy"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u8bf4\u660e Govern \u7684\u6cbb\u7406\u89d2\u8272\uff0c\u4e0d\u8981\u53ea\u5217\u529f\u80fd\u540d\u3002"
+    },
+    {
+      "id": "pdf_nist_csf_visual_functions",
+      "question": "CSF 2.0 \u7684\u56fe\u793a\u5982\u4f55\u5448\u73b0\u516d\u4e2a\u6838\u5fc3\u529f\u80fd\uff1f\u8bf7\u5f15\u7528\u56fe\u7247\u8bc1\u636e\u3002",
+      "expected_answer": "\u5e94\u57fa\u4e8e\u56fe\u7247/\u89c6\u89c9\u8bc1\u636e\u8bf4\u660e CSF \u56fe\u793a\u56f4\u7ed5 Govern\u3001Identify\u3001Protect\u3001Detect\u3001Respond\u3001Recover \u5c55\u793a\u6846\u67b6\u529f\u80fd\u5173\u7cfb\u3002",
+      "expected_document": "nist_cybersecurity_framework_2_0.pdf",
+      "expected_pages": [
+        8
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "Govern",
+        "Identify",
+        "Protect",
+        "Detect",
+        "Respond",
+        "Recover",
+        "\u56fe\u793a"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Summary",
+        "GOVERN",
+        "IDENTIFY"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5f15\u7528\u56fe\u7247/\u89c6\u89c9\u6458\u8981\uff0c\u4e0d\u5f97\u53ea\u7528\u76ee\u5f55\u6216\u6b63\u6587\u66ff\u4ee3\u56fe\u793a\u3002"
+    },
+    {
+      "id": "pdf_attention_transformer_core",
+      "question": "\u300aAttention Is All You Need\u300b\u7684\u6838\u5fc3\u6a21\u578b\u601d\u60f3\u662f\u4ec0\u4e48\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u8bba\u6587\u63d0\u51fa Transformer\uff0c\u5b8c\u5168\u57fa\u4e8e attention \u673a\u5236\uff0c\u907f\u514d\u5faa\u73af\u548c\u5377\u79ef\u7ed3\u6784\uff0c\u7528 encoder-decoder \u67b6\u6784\u5904\u7406\u5e8f\u5217\u8f6c\u5bfc\u4efb\u52a1\u3002",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        1,
+        2
+      ],
+      "expected_keywords": [
+        "Transformer",
+        "attention",
+        "recurrence",
+        "convolution",
+        "encoder",
+        "decoder"
+      ],
+      "expected_evidence_keywords": [
+        "Transformer",
+        "attention",
+        "recurrence",
+        "convolutions"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u8bf4\u660e Transformer \u4e0e recurrence/convolution \u7684\u533a\u522b\u3002"
+    },
+    {
+      "id": "pdf_attention_bleu_table",
+      "question": "\u300aAttention Is All You Need\u300b\u62a5\u544a\u7684\u673a\u5668\u7ffb\u8bd1 BLEU \u7ed3\u679c\u6709\u4ec0\u4e48\u4ee3\u8868\u6027\u6570\u503c\uff1f\u8bf7\u57fa\u4e8e\u8868\u683c\u8bc1\u636e\u56de\u7b54\u3002",
+      "expected_answer": "\u5e94\u57fa\u4e8e\u8868\u683c\u8bf4\u660e Transformer \u5728 WMT 2014 English-to-German \u4e0a\u8fbe\u5230 28.4 BLEU\uff0c\u5e76\u5728 English-to-French \u4e0a\u8fbe\u5230 41.8 BLEU \u5de6\u53f3\u3002",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        8
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "BLEU",
+        "28.4",
+        "41.8",
+        "WMT 2014",
+        "English-to-German",
+        "English-to-French"
+      ],
+      "expected_evidence_keywords": [
+        "BLEU",
+        "28.4",
+        "41.8"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5f15\u7528\u8868\u683c\u6216\u5305\u542b\u8868\u683c\u7ed3\u679c\u7684\u8bc1\u636e\uff0c\u6570\u503c\u4e0d\u80fd\u7f16\u9020\u3002"
+    },
+    {
+      "id": "pdf_attention_architecture_visual",
+      "question": "Transformer \u67b6\u6784\u56fe\u5c55\u793a\u4e86\u54ea\u4e9b\u4e3b\u8981\u7ec4\u4ef6\uff1f\u8bf7\u5f15\u7528\u56fe\u7247\u8bc1\u636e\u3002",
+      "expected_answer": "\u5e94\u57fa\u4e8e Figure 1 \u56fe\u7247/\u89c6\u89c9\u6458\u8981\u8bf4\u660e Transformer \u5305\u542b encoder\u3001decoder\u3001multi-head attention\u3001feed-forward\u3001positional encoding\u3001add & norm \u7b49\u7ec4\u4ef6\u3002",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "encoder",
+        "decoder",
+        "multi-head attention",
+        "feed-forward",
+        "positional encoding"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Summary",
+        "Transformer",
+        "Multi-Head Attention"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u4f7f\u7528\u67b6\u6784\u56fe\u8bc1\u636e\uff0c\u4e0d\u80fd\u53ea\u51ed\u6b63\u6587\u6982\u62ec\u3002"
+    },
+    {
+      "id": "pdf_bert_pretraining_objectives",
+      "question": "BERT \u8bba\u6587\u4f7f\u7528\u4e86\u54ea\u4e9b\u9884\u8bad\u7ec3\u76ee\u6807\uff1f",
+      "expected_answer": "\u5e94\u56de\u7b54 BERT \u4f7f\u7528 masked language model \u548c next sentence prediction \u4e24\u7c7b\u9884\u8bad\u7ec3\u76ee\u6807\u3002",
+      "expected_document": "bert_pretraining_bidirectional_transformers.pdf",
+      "expected_pages": [
+        2,
+        4
+      ],
+      "expected_keywords": [
+        "masked language model",
+        "Next Sentence Prediction",
+        "pre-training",
+        "BERT"
+      ],
+      "expected_evidence_keywords": [
+        "masked language model",
+        "Next Sentence Prediction"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u540c\u65f6\u63d0\u5230 MLM \u548c NSP\u3002"
+    },
+    {
+      "id": "pdf_bert_bidirectional_claim",
+      "question": "BERT \u8bba\u6587\u4e3a\u4ec0\u4e48\u5f3a\u8c03 bidirectional representations\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e BERT \u901a\u8fc7\u8054\u5408\u8c03\u8282\u5de6\u53f3\u4e0a\u4e0b\u6587\u6765\u9884\u8bad\u7ec3\u6df1\u5ea6\u53cc\u5411\u8868\u793a\uff0c\u6539\u5584\u4e0b\u6e38 NLP \u4efb\u52a1\u3002",
+      "expected_document": "bert_pretraining_bidirectional_transformers.pdf",
+      "expected_pages": [
+        1,
+        2
+      ],
+      "expected_keywords": [
+        "bidirectional",
+        "left",
+        "right",
+        "context",
+        "fine-tuning"
+      ],
+      "expected_evidence_keywords": [
+        "bidirectional",
+        "left and right context"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u57fa\u4e8e BERT \u539f\u6587\u89e3\u91ca\u53cc\u5411\u4e0a\u4e0b\u6587\uff0c\u800c\u4e0d\u662f\u6cdb\u6cdb\u8c08 Transformer\u3002"
+    },
+    {
+      "id": "pdf_bert_benchmark_table",
+      "question": "BERT \u8bba\u6587\u4e2d\u6709\u54ea\u4e9b\u4e0b\u6e38\u57fa\u51c6\u4efb\u52a1\u88ab\u7528\u4e8e\u8bc4\u4f30\uff1f\u8bf7\u57fa\u4e8e\u8868\u683c\u6216\u7ed3\u679c\u8bc1\u636e\u56de\u7b54\u3002",
+      "expected_answer": "\u5e94\u63d0\u5230 GLUE\u3001SQuAD\u3001SWAG \u7b49\u57fa\u51c6\u6216\u4efb\u52a1\uff0c\u5e76\u8bf4\u660e BERT \u5728\u591a\u4e2a\u4efb\u52a1\u4e0a\u8fdb\u884c\u8bc4\u4f30\u3002",
+      "expected_document": "bert_pretraining_bidirectional_transformers.pdf",
+      "expected_pages": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "GLUE",
+        "SQuAD",
+        "SWAG",
+        "benchmark",
+        "BERT"
+      ],
+      "expected_evidence_keywords": [
+        "GLUE",
+        "SQuAD",
+        "SWAG"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5f15\u7528\u7ed3\u679c\u6216\u8868\u683c\u8bc1\u636e\uff0c\u4e0d\u80fd\u53ea\u8bf4\u201c\u5f88\u591a\u4efb\u52a1\u201d\u3002"
+    },
+    {
+      "id": "pdf_clip_core_method",
+      "question": "CLIP \u8bba\u6587\u7684\u6838\u5fc3\u8bad\u7ec3\u65b9\u6cd5\u662f\u4ec0\u4e48\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e CLIP \u4ece\u81ea\u7136\u8bed\u8a00\u76d1\u7763\u4e2d\u5b66\u4e60\u89c6\u89c9\u6a21\u578b\uff0c\u901a\u8fc7\u56fe\u50cf-\u6587\u672c\u914d\u5bf9\u548c\u5bf9\u6bd4\u5b66\u4e60\u8bad\u7ec3\uff0c\u4f7f\u6a21\u578b\u5177\u5907\u96f6\u6837\u672c\u8fc1\u79fb\u80fd\u529b\u3002",
+      "expected_document": "clip_learning_transferable_visual_models.pdf",
+      "expected_pages": [
+        1,
+        2
+      ],
+      "expected_keywords": [
+        "natural language supervision",
+        "image-text",
+        "contrastive",
+        "zero-shot",
+        "CLIP"
+      ],
+      "expected_evidence_keywords": [
+        "natural language supervision",
+        "contrastive",
+        "zero-shot"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u8bf4\u660e\u56fe\u50cf-\u6587\u672c\u81ea\u7136\u8bed\u8a00\u76d1\u7763\u548c\u5bf9\u6bd4\u5b66\u4e60\u3002"
+    },
+    {
+      "id": "pdf_clip_dataset_scale",
+      "question": "CLIP \u4f7f\u7528\u4e86\u591a\u5927\u89c4\u6a21\u7684\u56fe\u50cf-\u6587\u672c\u6570\u636e\u8fdb\u884c\u8bad\u7ec3\uff1f",
+      "expected_answer": "\u5e94\u56de\u7b54 CLIP \u5728\u7ea6 400 million \u56fe\u50cf-\u6587\u672c\u5bf9\u4e0a\u8bad\u7ec3\u3002",
+      "expected_document": "clip_learning_transferable_visual_models.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_keywords": [
+        "400 million",
+        "image-text",
+        "pairs",
+        "CLIP"
+      ],
+      "expected_evidence_keywords": [
+        "400 million",
+        "image-text"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u7ed9\u51fa\u6570\u636e\u89c4\u6a21\uff0c\u4e0d\u80fd\u53ea\u8bf4\u201c\u5927\u89c4\u6a21\u201d\u3002"
+    },
+    {
+      "id": "pdf_clip_zero_shot_transfer",
+      "question": "CLIP \u8bba\u6587\u5982\u4f55\u8bc4\u4ef7 zero-shot transfer\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e CLIP \u901a\u8fc7\u81ea\u7136\u8bed\u8a00\u63d0\u793a\u8fdb\u884c zero-shot transfer\uff0c\u5e76\u5728\u591a\u4e2a\u89c6\u89c9\u4efb\u52a1\u6216\u6570\u636e\u96c6\u4e0a\u8bc4\u4f30\u3002",
+      "expected_document": "clip_learning_transferable_visual_models.pdf",
+      "expected_pages": [
+        1,
+        2,
+        3
+      ],
+      "expected_keywords": [
+        "zero-shot",
+        "transfer",
+        "natural language",
+        "ImageNet"
+      ],
+      "expected_evidence_keywords": [
+        "zero-shot",
+        "transfer",
+        "ImageNet"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u57fa\u4e8e CLIP \u8bc1\u636e\u8bf4\u660e zero-shot\uff0c\u4e0d\u8981\u6df7\u5165 SAM \u7684 promptable segmentation\u3002"
+    },
+    {
+      "id": "pdf_gpt2_webtext_dataset",
+      "question": "GPT-2 \u8bba\u6587\u4e2d\u7684 WebText \u6570\u636e\u96c6\u662f\u5982\u4f55\u6784\u5efa\u7684\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e WebText \u6765\u81ea Reddit \u4e0a\u9ad8 karma outbound links \u6293\u53d6\u7684\u7f51\u9875\u6587\u672c\uff0c\u7ea6 8 million \u6587\u6863\u6216\u7f51\u9875\u3002",
+      "expected_document": "gpt2_language_models_unsupervised_multitask_learners.pdf",
+      "expected_pages": [
+        2,
+        3
+      ],
+      "expected_keywords": [
+        "WebText",
+        "Reddit",
+        "8 million",
+        "outbound links",
+        "karma"
+      ],
+      "expected_evidence_keywords": [
+        "WebText",
+        "Reddit",
+        "8 million"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u56de\u7b54 WebText \u7684\u6765\u6e90\u548c\u89c4\u6a21\u3002"
+    },
+    {
+      "id": "pdf_gpt2_zero_shot_tasks",
+      "question": "GPT-2 \u8bba\u6587\u4e3a\u4ec0\u4e48\u5f3a\u8c03 zero-shot \u4efb\u52a1\u80fd\u529b\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u8bba\u6587\u6d4b\u8bd5\u8bed\u8a00\u6a21\u578b\u5728\u6ca1\u6709\u663e\u5f0f\u76d1\u7763\u5fae\u8c03\u7684\u60c5\u51b5\u4e0b\uff0c\u901a\u8fc7\u4efb\u52a1\u63cf\u8ff0\u6216\u4e0a\u4e0b\u6587\u5b8c\u6210\u9605\u8bfb\u7406\u89e3\u3001\u7ffb\u8bd1\u3001\u6458\u8981\u7b49\u4efb\u52a1\u3002",
+      "expected_document": "gpt2_language_models_unsupervised_multitask_learners.pdf",
+      "expected_pages": [
+        1,
+        2,
+        9,
+        10
+      ],
+      "expected_keywords": [
+        "zero-shot",
+        "language model",
+        "task",
+        "reading comprehension",
+        "translation",
+        "summarization"
+      ],
+      "expected_evidence_keywords": [
+        "zero-shot",
+        "reading comprehension",
+        "translation"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u8bf4\u660e zero-shot \u662f\u4efb\u52a1\u6cdb\u5316\u8bc4\u4f30\uff0c\u4e0d\u8981\u53ea\u8bf4\u6a21\u578b\u5f88\u5927\u3002"
+    },
+    {
+      "id": "pdf_gpt2_result_table",
+      "question": "GPT-2 \u8bba\u6587\u4e2d\u7684\u7ed3\u679c\u8868\u683c\u4e3b\u8981\u7528\u4e8e\u6bd4\u8f83\u4ec0\u4e48\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u8868\u683c\u7528\u4e8e\u6bd4\u8f83\u4e0d\u540c\u6a21\u578b\u6216\u4efb\u52a1\u4e0a\u7684 zero-shot/\u8bed\u8a00\u5efa\u6a21\u8868\u73b0\uff0c\u5c55\u793a GPT-2 \u5728\u591a\u4e2a NLP \u4efb\u52a1\u4e0a\u7684\u7ed3\u679c\u3002",
+      "expected_document": "gpt2_language_models_unsupervised_multitask_learners.pdf",
+      "expected_pages": [
+        9,
+        10,
+        11
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "zero-shot",
+        "results",
+        "language modeling",
+        "table",
+        "GPT-2"
+      ],
+      "expected_evidence_keywords": [
+        "zero-shot",
+        "results",
+        "Table"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5f15\u7528\u8868\u683c\u6216\u7ed3\u679c\u8bc1\u636e\u3002"
+    },
+    {
+      "id": "pdf_sam_main_contribution",
+      "question": "Segment Anything \u8bba\u6587\u7684\u4e3b\u8981\u8d21\u732e\u662f\u4ec0\u4e48\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u8bba\u6587\u63d0\u51fa Segment Anything Model (SAM)\u3001\u7528\u4e8e\u6536\u96c6\u6570\u636e\u7684\u6570\u636e\u5f15\u64ce\uff0c\u4ee5\u53ca SA-1B \u6570\u636e\u96c6\u3002",
+      "expected_document": "segment_anything.pdf",
+      "expected_pages": [
+        1,
+        2
+      ],
+      "expected_keywords": [
+        "Segment Anything Model",
+        "SAM",
+        "data engine",
+        "SA-1B",
+        "segmentation"
+      ],
+      "expected_evidence_keywords": [
+        "Segment Anything Model",
+        "data engine",
+        "SA-1B"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u540c\u65f6\u8986\u76d6\u6a21\u578b\u3001\u6570\u636e\u5f15\u64ce\u548c\u6570\u636e\u96c6\u3002"
+    },
+    {
+      "id": "pdf_sam_dataset_scale",
+      "question": "SA-1B \u6570\u636e\u96c6\u7684\u89c4\u6a21\u662f\u591a\u5c11\uff1f",
+      "expected_answer": "\u5e94\u56de\u7b54 SA-1B \u5305\u542b\u8d85\u8fc7 1 billion masks\uff0c\u6765\u81ea\u7ea6 11M images\u3002",
+      "expected_document": "segment_anything.pdf",
+      "expected_pages": [
+        1,
+        6,
+        7
+      ],
+      "expected_keywords": [
+        "SA-1B",
+        "1 billion masks",
+        "11M images",
+        "dataset"
+      ],
+      "expected_evidence_keywords": [
+        "1 billion masks",
+        "11M images",
+        "SA-1B"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u7ed9\u51fa masks \u548c images \u7684\u89c4\u6a21\u3002"
+    },
+    {
+      "id": "pdf_sam_promptable_visual",
+      "question": "Segment Anything \u7684\u56fe\u7247\u8bc1\u636e\u5982\u4f55\u5c55\u793a promptable segmentation\uff1f",
+      "expected_answer": "\u5e94\u57fa\u4e8e\u56fe\u7247/\u89c6\u89c9\u8bc1\u636e\u8bf4\u660e\u56fe\u4e2d\u5c55\u793a\u4e86\u5bf9\u4e0d\u540c\u5bf9\u8c61\u3001\u533a\u57df\u6216\u63a9\u7801\u7684\u5206\u5272\u793a\u4f8b\uff0c\u4f53\u73b0 promptable segmentation \u6216 zero-shot segmentation \u80fd\u529b\u3002",
+      "expected_document": "segment_anything.pdf",
+      "expected_pages": [
+        1,
+        2,
+        5
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "segmentation",
+        "mask",
+        "promptable",
+        "image",
+        "visual"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Summary",
+        "segmentation",
+        "mask"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5f15\u7528\u56fe\u7247/\u89c6\u89c9\u6458\u8981\uff0c\u4e0d\u8981\u53ea\u7528\u6458\u8981\u6587\u5b57\u3002"
+    },
+    {
+      "id": "pdf_scanned_cardinal_visual_content",
+      "question": "\u626b\u63cf\u578b PDF `ocrmypdf_cardinal_scanned.pdf` \u7684\u56fe\u7247\u5185\u5bb9\u662f\u4ec0\u4e48\uff1f",
+      "expected_answer": "\u5e94\u57fa\u4e8e\u56fe\u7247/\u89c6\u89c9\u6458\u8981\u8bf4\u660e\u8be5\u626b\u63cf PDF \u662f LinnSequencer 32 \u8f68 MIDI \u97f3\u5e8f\u5f55\u97f3\u5668/\u5e8f\u5217\u5668\u7684\u4ea7\u54c1\u8bf4\u660e\u9875\u3002",
+      "expected_document": "ocrmypdf_cardinal_scanned.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "image",
+        "vision",
+        "ocr"
+      ],
+      "expected_keywords": [
+        "LinnSequencer",
+        "32",
+        "MIDI",
+        "\u4ea7\u54c1\u8bf4\u660e",
+        "\u626b\u63cf"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Summary",
+        "LinnSequencer",
+        "MIDI"
+      ],
+      "judge_rubric": "\u8fd9\u662f\u626b\u63cf\u578b PDF\uff0c\u5fc5\u987b\u4f7f\u7528\u56fe\u7247/\u89c6\u89c9\u8bc1\u636e\uff1b\u5982\u679c\u58f0\u79f0\u65e0\u6cd5\u8bfb\u53d6\uff0c\u5e94\u5224\u4f4e\u5206\u3002"
+    },
+    {
+      "id": "pdf_scanned_no_text_layer",
+      "question": "`ocrmypdf_cardinal_scanned.pdf` \u662f\u5426\u6709\u53ef\u76f4\u63a5\u62bd\u53d6\u7684\u6587\u672c\u5c42\uff1f\u5f53\u524d\u7cfb\u7edf\u4e3b\u8981\u4f9d\u8d56\u4ec0\u4e48\u8bc1\u636e\u56de\u7b54\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u8be5 PDF \u57fa\u672c\u6ca1\u6709\u53ef\u76f4\u63a5\u62bd\u53d6\u7684\u6587\u672c\u5c42\uff0c\u5f53\u524d\u4e3b\u8981\u4f9d\u8d56\u56fe\u7247/\u89c6\u89c9\u6458\u8981\uff0c\u800c\u4e0d\u662f\u666e\u901a\u6b63\u6587\u6587\u672c\u3002",
+      "expected_document": "ocrmypdf_cardinal_scanned.pdf",
+      "expected_modalities": [
+        "image",
+        "vision",
+        "ocr"
+      ],
+      "expected_keywords": [
+        "\u6ca1\u6709\u6587\u672c\u5c42",
+        "\u56fe\u7247",
+        "\u89c6\u89c9\u6458\u8981",
+        "\u626b\u63cf"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Summary"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u8bda\u5b9e\u8bf4\u660e\u626b\u63cf\u578b PDF \u7684\u8bc1\u636e\u6765\u6e90\u3002"
+    },
+    {
+      "id": "multi_pdf_transformer_to_bert_relation",
+      "question": "\u300aAttention Is All You Need\u300b\u548c BERT \u4e4b\u95f4\u662f\u4ec0\u4e48\u6280\u672f\u5173\u7cfb\uff1f\u8bf7\u5206\u522b\u5f15\u7528\u8bc1\u636e\u3002",
+      "expected_answer": "\u5e94\u8bf4\u660e Attention \u8bba\u6587\u63d0\u51fa Transformer \u67b6\u6784\uff1bBERT \u4f7f\u7528 Transformer \u7684\u53cc\u5411\u7f16\u7801\u5668\u601d\u60f3\u8fdb\u884c\u9884\u8bad\u7ec3\uff0c\u56e0\u6b64\u4e8c\u8005\u662f\u57fa\u7840\u67b6\u6784\u4e0e\u4e0b\u6e38\u9884\u8bad\u7ec3\u6a21\u578b\u4e4b\u95f4\u7684\u7ee7\u627f/\u5e94\u7528\u5173\u7cfb\u3002",
+      "expected_documents": [
+        "attention_is_all_you_need.pdf",
+        "bert_pretraining_bidirectional_transformers.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "Transformer",
+        "BERT",
+        "bidirectional",
+        "pre-training",
+        "\u5173\u7cfb"
+      ],
+      "relation_keywords": [
+        "\u57fa\u7840",
+        "\u5e94\u7528",
+        "\u5206\u522b"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5206\u522b\u5f15\u7528\u4e24\u7bc7 PDF\uff0c\u4e0d\u80fd\u628a BERT \u8bf4\u6210 Attention \u539f\u6587\u7684\u4e00\u90e8\u5206\u3002",
+      "expected_relation": "support"
+    },
+    {
+      "id": "multi_pdf_gpt2_clip_zero_shot_relation",
+      "question": "GPT-2 \u548c CLIP \u90fd\u8c08\u5230 zero-shot\uff0c\u5b83\u4eec\u7684 zero-shot \u542b\u4e49\u6709\u4ec0\u4e48\u76f8\u540c\u548c\u4e0d\u540c\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u5171\u540c\u70b9\u662f\u90fd\u5f3a\u8c03\u65e0\u9700\u4efb\u52a1\u7279\u5b9a\u76d1\u7763\u7684\u8fc1\u79fb/\u6cdb\u5316\uff1b\u4e0d\u540c\u70b9\u662f GPT-2 \u9762\u5411\u8bed\u8a00\u4efb\u52a1\uff0cCLIP \u9762\u5411\u56fe\u50cf-\u6587\u672c\u89c6\u89c9\u4efb\u52a1\u548c\u81ea\u7136\u8bed\u8a00\u63d0\u793a\u3002",
+      "expected_documents": [
+        "gpt2_language_models_unsupervised_multitask_learners.pdf",
+        "clip_learning_transferable_visual_models.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "zero-shot",
+        "GPT-2",
+        "CLIP",
+        "\u8bed\u8a00",
+        "\u89c6\u89c9",
+        "\u4e0d\u540c"
+      ],
+      "relation_keywords": [
+        "\u5171\u540c",
+        "\u4e0d\u540c",
+        "\u5bf9\u6bd4"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5904\u7406\u540c\u4e00\u672f\u8bed\u5728\u4e0d\u540c\u8bba\u6587\u4e2d\u7684\u4e0d\u540c\u4efb\u52a1\u8bed\u5883\u3002",
+      "expected_relation": "comparison"
+    },
+    {
+      "id": "multi_pdf_clip_sam_vision_foundation_relation",
+      "question": "CLIP \u548c Segment Anything \u5728\u89c6\u89c9\u57fa\u7840\u6a21\u578b\u65b9\u5411\u4e0a\u6709\u4ec0\u4e48\u5173\u7cfb\u548c\u5dee\u5f02\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e CLIP \u901a\u8fc7\u56fe\u50cf-\u6587\u672c\u81ea\u7136\u8bed\u8a00\u76d1\u7763\u5b66\u4e60\u53ef\u8fc1\u79fb\u89c6\u89c9\u8868\u5f81\uff0cSAM \u5173\u6ce8 promptable segmentation\u3001\u6570\u636e\u5f15\u64ce\u548c SA-1B\uff0c\u4e24\u8005\u90fd\u5f3a\u8c03\u6cdb\u5316\uff0c\u4f46\u4efb\u52a1\u548c\u8bad\u7ec3\u76ee\u6807\u4e0d\u540c\u3002",
+      "expected_documents": [
+        "clip_learning_transferable_visual_models.pdf",
+        "segment_anything.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "CLIP",
+        "SAM",
+        "zero-shot",
+        "promptable",
+        "segmentation",
+        "natural language supervision"
+      ],
+      "relation_keywords": [
+        "\u5173\u7cfb",
+        "\u5dee\u5f02",
+        "\u5171\u540c"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5206\u522b\u8bf4\u660e CLIP \u548c SAM \u7684\u4efb\u52a1\u8fb9\u754c\u3002",
+      "expected_relation": "comparison"
+    },
+    {
+      "id": "multi_pdf_nist_govern_conflict_check",
+      "question": "NIST AI RMF 1.0 \u548c NIST CSF 2.0 \u90fd\u6709 Govern\uff0c\u8fd9\u662f\u5426\u8868\u793a\u4e24\u4e2a\u6846\u67b6\u5b8c\u5168\u76f8\u540c\uff1f",
+      "expected_answer": "\u5e94\u56de\u7b54\u4e0d\u662f\u3002AI RMF \u7684 Govern \u662f AI \u98ce\u9669\u7ba1\u7406\u6838\u5fc3\u529f\u80fd\u4e4b\u4e00\uff0cCSF 2.0 \u7684 Govern \u662f\u7f51\u7edc\u5b89\u5168\u98ce\u9669\u6cbb\u7406\u529f\u80fd\uff1b\u540d\u79f0\u76f8\u540c\uff0c\u4f46\u9002\u7528\u9886\u57df\u548c\u6846\u67b6\u529f\u80fd\u96c6\u5408\u4e0d\u540c\u3002",
+      "expected_documents": [
+        "nist_ai_rmf_1_0.pdf",
+        "nist_cybersecurity_framework_2_0.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "\u4e0d\u662f\u5b8c\u5168\u76f8\u540c",
+        "Govern",
+        "AI risk",
+        "cybersecurity risk",
+        "\u9886\u57df\u4e0d\u540c"
+      ],
+      "relation_keywords": [
+        "\u540c\u540d",
+        "\u4e0d\u540c",
+        "\u4e0d\u662f"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u5904\u7406\u540c\u540d\u672f\u8bed\u4e0d\u540c\u8bed\u5883\uff0c\u4e0d\u80fd\u628a\u4e24\u4e2a NIST \u6846\u67b6\u6df7\u4e3a\u4e00\u8c08\u3002",
+      "expected_relation": "same_term_different_context"
+    },
+    {
+      "id": "multi_pdf_nist_functions_compare",
+      "question": "\u8bf7\u6bd4\u8f83 AI RMF 1.0 \u548c CSF 2.0 \u7684\u6838\u5fc3\u529f\u80fd\u96c6\u5408\u3002",
+      "expected_answer": "\u5e94\u8bf4\u660e AI RMF 1.0 \u662f Govern\u3001Map\u3001Measure\u3001Manage\uff1bCSF 2.0 \u662f Govern\u3001Identify\u3001Protect\u3001Detect\u3001Respond\u3001Recover\u3002\u4e24\u8005\u90fd\u542b Govern\uff0c\u4f46\u529f\u80fd\u96c6\u5408\u4e0d\u540c\u3002",
+      "expected_documents": [
+        "nist_ai_rmf_1_0.pdf",
+        "nist_cybersecurity_framework_2_0.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "Govern",
+        "Map",
+        "Measure",
+        "Manage",
+        "Identify",
+        "Protect",
+        "Detect",
+        "Respond",
+        "Recover"
+      ],
+      "relation_keywords": [
+        "\u6bd4\u8f83",
+        "\u4e0d\u540c",
+        "\u5171\u540c"
+      ],
+      "judge_rubric": "\u53ef\u7528\u8868\u683c\uff0c\u4f46\u5fc5\u987b\u6765\u6e90\u6e05\u695a\uff0c\u4e0d\u80fd\u6f0f\u6389\u4efb\u4e00\u6846\u67b6\u529f\u80fd\u3002",
+      "expected_relation": "comparison"
+    },
+    {
+      "id": "mixed_pdf_docx_network_security_boundary",
+      "question": "CSF 2.0 \u80fd\u5426\u76f4\u63a5\u8bc1\u660e\u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u4e8c\u5df2\u7ecf\u5b9e\u73b0\u4e86\u5b89\u5168\u5ba1\u8ba1\u529f\u80fd\uff1f",
+      "expected_answer": "\u5e94\u62d2\u7edd\u80af\u5b9a\u7ed3\u8bba\u3002CSF 2.0 \u662f\u7f51\u7edc\u5b89\u5168\u6846\u67b6\uff0c\u5b9e\u9a8c\u4e8c\u662f\u7aef\u53e3\u626b\u63cf\u5b9e\u9a8c\uff1b\u5373\u4f7f\u90fd\u4e0e\u7f51\u7edc\u6709\u5173\uff0c\u4e5f\u4e0d\u80fd\u8bc1\u660e\u5b9e\u9a8c\u4e8c\u5b9e\u73b0\u5b89\u5168\u5ba1\u8ba1\u3002",
+      "expected_documents": [
+        "nist_cybersecurity_framework_2_0.pdf",
+        "\u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u4e8c.docx"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "\u4e0d\u80fd\u8bc1\u660e",
+        "CSF 2.0",
+        "\u7aef\u53e3\u626b\u63cf",
+        "\u5b89\u5168\u5ba1\u8ba1",
+        "\u6ca1\u6709\u8bc1\u636e"
+      ],
+      "relation_keywords": [
+        "\u4e0d\u80fd",
+        "\u8fb9\u754c"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u62d2\u7edd\u8de8\u6587\u6863\u65e0\u8bc1\u636e\u63a8\u65ad\uff0c\u4e0d\u80fd\u7528\u6846\u67b6\u6587\u6863\u66ff\u4ee3\u5b9e\u9a8c\u5b9e\u73b0\u8bc1\u636e\u3002",
+      "expected_refusal": true,
+      "expected_relation": "boundary",
+      "forbidden_claims": []
+    },
+    {
+      "id": "mixed_pdf_docx_tcp_not_ai_rmf",
+      "question": "NIST AI RMF 1.0 \u662f\u5426\u8bc1\u660e\u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u4e00\u7684 TCP \u56de\u663e\u7a0b\u5e8f\u5177\u5907\u53ef\u4fe1 AI \u7279\u5f81\uff1f",
+      "expected_answer": "\u5e94\u8bf4\u660e\u4e0d\u80fd\u3002AI RMF \u63cf\u8ff0 AI \u98ce\u9669\u7ba1\u7406\u548c\u53ef\u4fe1 AI \u7279\u5f81\uff0c\u5b9e\u9a8c\u4e00\u662f TCP C/S \u56de\u663e\u901a\u4fe1\uff0c\u4e8c\u8005\u6ca1\u6709\u76f4\u63a5\u8bc1\u636e\u94fe\u8bc1\u660e\u8be5\u7a0b\u5e8f\u662f\u53ef\u4fe1 AI \u7cfb\u7edf\u3002",
+      "expected_documents": [
+        "nist_ai_rmf_1_0.pdf",
+        "\u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u4e00.docx"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "\u4e0d\u80fd",
+        "AI RMF",
+        "TCP",
+        "\u53ef\u4fe1 AI",
+        "\u6ca1\u6709\u76f4\u63a5\u8bc1\u636e"
+      ],
+      "relation_keywords": [
+        "\u8bc1\u636e\u4e0d\u8db3",
+        "\u8fb9\u754c"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u533a\u5206\u6846\u67b6\u6982\u5ff5\u548c\u5b9e\u9a8c\u7a0b\u5e8f\u5b9e\u73b0\uff0c\u4e0d\u5f97\u786c\u5957\u53ef\u4fe1 AI\u3002",
+      "expected_refusal": true,
+      "expected_relation": "boundary",
+      "forbidden_claims": []
+    },
+    {
+      "id": "insufficient_pdf_udp_claim",
+      "question": "\u8fd9\u4e9b PDF \u662f\u5426\u8bc1\u660e\u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u5df2\u7ecf\u5b9e\u73b0 UDP \u901a\u4fe1\uff1f",
+      "expected_answer": "\u5e94\u62d2\u7edd\u80af\u5b9a\u7ed3\u8bba\u3002PDF \u8bed\u6599\u4e3b\u8981\u662f AI\u3001\u7f51\u7edc\u5b89\u5168\u6846\u67b6\u3001NLP/\u89c6\u89c9\u8bba\u6587\u548c\u626b\u63cf\u4ea7\u54c1\u9875\uff0c\u4e0d\u80fd\u8bc1\u660e DOCX \u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u5b9e\u73b0 UDP \u901a\u4fe1\u3002",
+      "expected_documents": [
+        "attention_is_all_you_need.pdf",
+        "nist_cybersecurity_framework_2_0.pdf",
+        "\u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u4e00.docx",
+        "\u7f51\u7edc\u7a0b\u5e8f\u8bbe\u8ba1\u5b9e\u9a8c\u4e8c.docx"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "\u4e0d\u80fd\u8bc1\u660e",
+        "UDP",
+        "TCP",
+        "\u6ca1\u6709\u8bc1\u636e"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u62d2\u7edd\u65e0\u8bc1\u636e\u4e3b\u5f20\uff0c\u4e0d\u80fd\u4ece PDF \u6216 TCP \u5b9e\u9a8c\u63a8\u5bfc UDP \u5b9e\u73b0\u3002",
+      "expected_refusal": true,
+      "expected_relation": "boundary",
+      "forbidden_claims": []
+    },
+    {
+      "id": "insufficient_pdf_medical_claim",
+      "question": "\u8fd9\u4e9b PDF \u662f\u5426\u8bc1\u660e\u67d0\u4e2a\u4e34\u5e8a\u8bca\u65ad\u51c6\u786e\u7387\u663e\u8457\u63d0\u9ad8\uff1f",
+      "expected_answer": "\u5e94\u62d2\u7edd\u80af\u5b9a\u7ed3\u8bba\u3002\u5f53\u524d PDF/DOCX \u8bed\u6599\u4e0d\u5305\u542b\u4e34\u5e8a\u8bca\u65ad\u51c6\u786e\u7387\u5b9e\u9a8c\uff0c\u4e0d\u80fd\u8bc1\u660e\u8be5\u533b\u5b66\u4e3b\u5f20\u3002",
+      "expected_documents": [
+        "bert_pretraining_bidirectional_transformers.pdf",
+        "clip_learning_transferable_visual_models.pdf",
+        "segment_anything.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "\u4e0d\u80fd\u8bc1\u660e",
+        "\u4e34\u5e8a\u8bca\u65ad",
+        "\u51c6\u786e\u7387",
+        "\u6ca1\u6709\u8bc1\u636e"
+      ],
+      "judge_rubric": "\u5fc5\u987b\u62d2\u7edd\u533b\u7597\u7c7b\u65e0\u8bc1\u636e\u63a8\u65ad\uff0c\u4e0d\u5f97\u7528 AI \u8bba\u6587\u5e38\u8bc6\u8865\u7b54\u6848\u3002",
+      "expected_refusal": true,
+      "expected_relation": "boundary",
+      "forbidden_claims": []
+    },
+    {
+      "id": "format_mixed_pdf_docx_comparison",
+      "question": "\u8bf7\u6bd4\u8f83 BERT\u3001GPT-2 \u548c CLIP \u7684\u9884\u8bad\u7ec3\u6570\u636e/\u76ee\u6807\u5dee\u5f02\uff1b\u5982\u679c\u8868\u683c\u66f4\u6e05\u6670\u53ef\u4ee5\u4f7f\u7528\u8868\u683c\u3002",
+      "expected_answer": "\u5e94\u5206\u522b\u8bf4\u660e BERT \u4f7f\u7528 MLM/NSP \u9884\u8bad\u7ec3\u76ee\u6807\uff0cGPT-2 \u4f7f\u7528 WebText \u8bed\u8a00\u5efa\u6a21\u5e76\u8bc4\u4f30 zero-shot \u4efb\u52a1\uff0cCLIP \u4f7f\u7528\u56fe\u50cf-\u6587\u672c\u5bf9\u548c\u81ea\u7136\u8bed\u8a00\u76d1\u7763/\u5bf9\u6bd4\u5b66\u4e60\u3002",
+      "expected_documents": [
+        "bert_pretraining_bidirectional_transformers.pdf",
+        "gpt2_language_models_unsupervised_multitask_learners.pdf",
+        "clip_learning_transferable_visual_models.pdf"
+      ],
+      "required_document_count": 3,
+      "expected_keywords": [
+        "BERT",
+        "GPT-2",
+        "CLIP",
+        "MLM",
+        "WebText",
+        "image-text",
+        "contrastive"
+      ],
+      "relation_keywords": [
+        "\u6bd4\u8f83",
+        "\u5dee\u5f02",
+        "\u5206\u522b"
+      ],
+      "judge_rubric": "\u56de\u7b54\u4e0d\u5f3a\u5236\u8868\u683c\uff0c\u4f46\u5fc5\u987b\u4e09\u7bc7\u90fd\u8986\u76d6\u4e14\u6765\u6e90\u6e05\u695a\u3002",
+      "expected_relation": "comparison"
+    },
+    {
+      "id": "pdf_attention_self_attention_advantage",
+      "question": "In Attention Is All You Need, why is self-attention useful for long-range dependencies and parallel computation?",
+      "expected_answer": "The answer should explain shorter path length, fewer sequential operations, parallelism, and replacement of recurrence/convolution.",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        2,
+        6
+      ],
+      "expected_keywords": [
+        "self-attention",
+        "long-range dependencies",
+        "parallel",
+        "path length",
+        "sequential operations"
+      ],
+      "expected_evidence_keywords": [
+        "Self-Attention",
+        "Sequential Operations",
+        "Maximum Path Length"
+      ],
+      "expected_claims": [
+        "self-attention",
+        "path length",
+        "parallel"
+      ],
+      "forbidden_claims": [
+        "BERT proposed self-attention"
+      ],
+      "judge_rubric": "Use Attention paper evidence, not later model knowledge."
+    },
+    {
+      "id": "pdf_attention_positional_encoding",
+      "question": "Why does Transformer need positional encoding, and what form does the paper use?",
+      "expected_answer": "The answer should say the model has no recurrence/convolution and injects order with sine/cosine positional encodings.",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_keywords": [
+        "positional encoding",
+        "sine",
+        "cosine",
+        "sequence order"
+      ],
+      "expected_evidence_keywords": [
+        "positional encodings",
+        "sine",
+        "cosine"
+      ],
+      "expected_claims": [
+        "positional encoding",
+        "sine",
+        "cosine"
+      ],
+      "judge_rubric": "Must mention order information and sine/cosine encodings."
+    },
+    {
+      "id": "pdf_attention_training_data_wmt",
+      "question": "What WMT 2014 training data sizes are reported in the Attention paper?",
+      "expected_answer": "The answer should mention about 4.5 million English-German sentence pairs and about 36M English-French sentences.",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        7
+      ],
+      "expected_keywords": [
+        "WMT 2014",
+        "English-German",
+        "4.5 million",
+        "English-French",
+        "36M"
+      ],
+      "expected_evidence_keywords": [
+        "4.5 million sentence pairs",
+        "36M sentences"
+      ],
+      "expected_claims": [
+        "4.5 million",
+        "36M"
+      ],
+      "judge_rubric": "Must give both task data sizes."
+    },
+    {
+      "id": "pdf_attention_complexity_table",
+      "question": "How does Table 1 compare self-attention, recurrent, and convolutional layers?",
+      "expected_answer": "The answer should use Table 1 and cover complexity per layer, sequential operations, and maximum path length.",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        6
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "Table 1",
+        "complexity",
+        "sequential operations",
+        "maximum path length",
+        "self-attention"
+      ],
+      "expected_evidence_keywords": [
+        "Table 1",
+        "Complexity per Layer",
+        "Sequential Operations",
+        "Maximum Path Length"
+      ],
+      "expected_claims": [
+        "Sequential Operations",
+        "Maximum Path Length"
+      ],
+      "judge_rubric": "Must cite table evidence."
+    },
+    {
+      "id": "pdf_attention_regularization_details",
+      "question": "What regularization details are reported in the Attention training setup?",
+      "expected_answer": "The answer should mention dropout rate 0.1 and label smoothing epsilon 0.1.",
+      "expected_document": "attention_is_all_you_need.pdf",
+      "expected_pages": [
+        8
+      ],
+      "expected_keywords": [
+        "dropout",
+        "0.1",
+        "label smoothing"
+      ],
+      "expected_evidence_keywords": [
+        "dropout",
+        "label smoothing",
+        "0.1"
+      ],
+      "expected_claims": [
+        "dropout",
+        "label smoothing"
+      ],
+      "judge_rubric": "Must give regularization items and values."
+    },
+    {
+      "id": "pdf_bert_input_representation",
+      "question": "What parts make up BERT input representation, and what are [CLS] and [SEP] used for?",
+      "expected_answer": "The answer should mention token, segment, and position embeddings; [CLS] for sequence representation and [SEP] for separation.",
+      "expected_document": "bert_pretraining_bidirectional_transformers.pdf",
+      "expected_pages": [
+        4,
+        5
+      ],
+      "expected_keywords": [
+        "token embeddings",
+        "segment embeddings",
+        "position embeddings",
+        "[CLS]",
+        "[SEP]"
+      ],
+      "expected_evidence_keywords": [
+        "Token Embeddings",
+        "Segment Embeddings",
+        "Position Embeddings",
+        "[CLS]",
+        "[SEP]"
+      ],
+      "expected_claims": [
+        "token embeddings",
+        "segment embeddings",
+        "position embeddings"
+      ],
+      "judge_rubric": "Must answer from BERT input representation."
+    },
+    {
+      "id": "pdf_bert_mask_rate",
+      "question": "In BERT masked language modeling, what percentage of WordPiece tokens are masked?",
+      "expected_answer": "The answer should say 15 percent of WordPiece tokens in each sequence are masked at random.",
+      "expected_document": "bert_pretraining_bidirectional_transformers.pdf",
+      "expected_pages": [
+        4
+      ],
+      "expected_keywords": [
+        "15%",
+        "WordPiece",
+        "masked language model"
+      ],
+      "expected_evidence_keywords": [
+        "mask 15%",
+        "WordPiece"
+      ],
+      "expected_claims": [
+        "15%",
+        "WordPiece"
+      ],
+      "judge_rubric": "Must include the 15 percent rate."
+    },
+    {
+      "id": "pdf_bert_glue_result_table_detail",
+      "question": "What does the BERT GLUE table show relative to OpenAI GPT?",
+      "expected_answer": "The answer should explain that GLUE tasks compare BERTBASE/BERTLARGE with OpenAI GPT and other systems, with BERT stronger on many tasks.",
+      "expected_document": "bert_pretraining_bidirectional_transformers.pdf",
+      "expected_pages": [
+        6
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "GLUE",
+        "OpenAI GPT",
+        "BERTBASE",
+        "BERTLARGE",
+        "Average"
+      ],
+      "expected_evidence_keywords": [
+        "GLUE",
+        "OpenAI GPT",
+        "BERTBASE",
+        "BERTLARGE"
+      ],
+      "expected_claims": [
+        "GLUE",
+        "OpenAI GPT"
+      ],
+      "judge_rubric": "Must cite the GLUE table."
+    },
+    {
+      "id": "pdf_bert_squad_swag_results",
+      "question": "Besides GLUE, what reading comprehension or commonsense tasks does BERT report?",
+      "expected_answer": "The answer should mention SQuAD and SWAG as downstream evaluations.",
+      "expected_document": "bert_pretraining_bidirectional_transformers.pdf",
+      "expected_pages": [
+        7,
+        8
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "SQuAD",
+        "SWAG",
+        "question answering",
+        "commonsense"
+      ],
+      "expected_evidence_keywords": [
+        "SQuAD",
+        "SWAG"
+      ],
+      "expected_claims": [
+        "SQuAD",
+        "SWAG"
+      ],
+      "judge_rubric": "Must cover SQuAD and SWAG."
+    },
+    {
+      "id": "pdf_gpt2_bpe_context",
+      "question": "How does the GPT-2 paper describe vocabulary and context length settings?",
+      "expected_answer": "The answer should mention byte pair encoding, a 50,257 vocabulary, and context size increased to 1024.",
+      "expected_document": "gpt2_language_models_unsupervised_multitask_learners.pdf",
+      "expected_pages": [
+        4
+      ],
+      "expected_keywords": [
+        "Byte Pair Encoding",
+        "50,257",
+        "context size",
+        "1024"
+      ],
+      "expected_evidence_keywords": [
+        "Byte Pair Encoding",
+        "50,257",
+        "context size",
+        "1024"
+      ],
+      "expected_claims": [
+        "50,257",
+        "1024"
+      ],
+      "judge_rubric": "Must give vocabulary and context length."
+    },
+    {
+      "id": "pdf_gpt2_lambada_result_table",
+      "question": "What does LAMBADA illustrate in the GPT-2 zero-shot results table?",
+      "expected_answer": "The answer should say LAMBADA is one zero-shot evaluation task and no training or fine-tuning was performed for those results.",
+      "expected_document": "gpt2_language_models_unsupervised_multitask_learners.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "LAMBADA",
+        "zero-shot",
+        "No training",
+        "fine-tuning"
+      ],
+      "expected_evidence_keywords": [
+        "LAMBADA",
+        "Zero-shot results",
+        "No training or fine-tuning"
+      ],
+      "expected_claims": [
+        "LAMBADA",
+        "zero-shot"
+      ],
+      "judge_rubric": "Must cite result table or nearby caption."
+    },
+    {
+      "id": "pdf_gpt2_commoncrawl_boundary",
+      "question": "Is GPT-2 WebText the same as directly using Common Crawl?",
+      "expected_answer": "The answer should distinguish WebText from Common Crawl and mention Reddit outbound links / high karma filtering.",
+      "expected_document": "gpt2_language_models_unsupervised_multitask_learners.pdf",
+      "expected_pages": [
+        2,
+        3
+      ],
+      "expected_keywords": [
+        "WebText",
+        "Reddit",
+        "Common Crawl",
+        "outbound links"
+      ],
+      "expected_evidence_keywords": [
+        "WebText",
+        "Reddit",
+        "Common Crawl"
+      ],
+      "expected_claims": [
+        "WebText",
+        "Reddit"
+      ],
+      "forbidden_claims": [
+        "WebText is Common Crawl"
+      ],
+      "expected_relation": "boundary",
+      "judge_rubric": "Must distinguish WebText construction from Common Crawl."
+    },
+    {
+      "id": "pdf_clip_contrastive_batch_objective",
+      "question": "How does CLIP use image and text pairs in a batch for contrastive learning?",
+      "expected_answer": "The answer should mention image encoder, text encoder, cosine similarity, and N real pairs in a batch.",
+      "expected_document": "clip_learning_transferable_visual_models.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_keywords": [
+        "image encoder",
+        "text encoder",
+        "cosine similarity",
+        "N real pairs",
+        "contrastive"
+      ],
+      "expected_evidence_keywords": [
+        "image encoder",
+        "text encoder",
+        "cosine similarity",
+        "N real pairs"
+      ],
+      "expected_claims": [
+        "image encoder",
+        "text encoder",
+        "cosine similarity"
+      ],
+      "judge_rubric": "Must explain image/text encoders and real-pair similarity."
+    },
+    {
+      "id": "pdf_clip_zero_shot_linear_probe_table",
+      "question": "What does the CLIP zero-shot versus linear-probe comparison show?",
+      "expected_answer": "The answer should mention a 27 dataset evaluation, zero-shot CLIP, linear probe ResNet50, and ImageNet.",
+      "expected_document": "clip_learning_transferable_visual_models.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "expected_keywords": [
+        "zero-shot CLIP",
+        "linear probe",
+        "ResNet50",
+        "27 dataset",
+        "ImageNet"
+      ],
+      "expected_evidence_keywords": [
+        "Zero-shot CLIP",
+        "Linear Probe",
+        "ResNet50",
+        "27 dataset",
+        "ImageNet"
+      ],
+      "expected_claims": [
+        "zero-shot CLIP",
+        "linear probe"
+      ],
+      "judge_rubric": "Must cite table or adjacent result evidence."
+    },
+    {
+      "id": "pdf_clip_zero_shot_classifier_mechanism",
+      "question": "How does CLIP turn classification into a zero-shot image-text matching problem?",
+      "expected_answer": "The answer should say class names become candidate text pairings and the model picks the most probable image-text pairing.",
+      "expected_document": "clip_learning_transferable_visual_models.pdf",
+      "expected_pages": [
+        4
+      ],
+      "expected_keywords": [
+        "zero-shot",
+        "class names",
+        "text pairings",
+        "image",
+        "dataset"
+      ],
+      "expected_evidence_keywords": [
+        "class names",
+        "text pairings",
+        "image"
+      ],
+      "expected_claims": [
+        "class names",
+        "text pairings"
+      ],
+      "judge_rubric": "Must explain class names / text prompts."
+    },
+    {
+      "id": "pdf_clip_ocr_capability_boundary",
+      "question": "CLIP mentions OCR. Does that mean CLIP is a dedicated OCR system?",
+      "expected_answer": "The answer should say no: OCR is mentioned as a task capability, but CLIP is not positioned as a dedicated OCR system.",
+      "expected_document": "clip_learning_transferable_visual_models.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_keywords": [
+        "OCR",
+        "zero-shot",
+        "CLIP",
+        "not dedicated"
+      ],
+      "expected_evidence_keywords": [
+        "OCR",
+        "zero-shot CLIP"
+      ],
+      "expected_claims": [
+        "OCR",
+        "zero-shot"
+      ],
+      "forbidden_claims": [
+        "CLIP is a dedicated OCR system"
+      ],
+      "expected_relation": "boundary",
+      "judge_rubric": "Avoid overstating CLIP as a dedicated OCR product."
+    },
+    {
+      "id": "pdf_sam_promptable_task_definition",
+      "question": "How does SAM define the promptable segmentation task?",
+      "expected_answer": "The answer should say the model receives prompts and returns valid segmentation masks, including ambiguous prompts.",
+      "expected_document": "segment_anything.pdf",
+      "expected_pages": [
+        3,
+        4
+      ],
+      "expected_keywords": [
+        "promptable segmentation",
+        "prompt",
+        "valid mask",
+        "segmentation"
+      ],
+      "expected_evidence_keywords": [
+        "prompt",
+        "valid mask",
+        "segmentation"
+      ],
+      "expected_claims": [
+        "prompt",
+        "valid mask"
+      ],
+      "judge_rubric": "Must mention prompt and valid mask."
+    },
+    {
+      "id": "pdf_sam_model_components",
+      "question": "What are the main model components of SAM?",
+      "expected_answer": "The answer should mention image encoder, prompt encoder, and mask decoder.",
+      "expected_document": "segment_anything.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_keywords": [
+        "image encoder",
+        "prompt encoder",
+        "mask decoder",
+        "Transformer decoder"
+      ],
+      "expected_evidence_keywords": [
+        "image encoder",
+        "prompt encoder",
+        "mask decoder"
+      ],
+      "expected_claims": [
+        "image encoder",
+        "prompt encoder",
+        "mask decoder"
+      ],
+      "judge_rubric": "Must cover main SAM components."
+    },
+    {
+      "id": "pdf_sam_data_engine_stages",
+      "question": "Why is the SAM data engine important, and what stages does it include?",
+      "expected_answer": "The answer should mention large-scale mask collection and assisted-manual, semi-automatic, fully automatic stages.",
+      "expected_document": "segment_anything.pdf",
+      "expected_pages": [
+        2,
+        6
+      ],
+      "expected_keywords": [
+        "data engine",
+        "assisted-manual",
+        "semi-automatic",
+        "fully automatic",
+        "masks"
+      ],
+      "expected_evidence_keywords": [
+        "data engine",
+        "assisted-manual",
+        "semi-automatic",
+        "fully automatic"
+      ],
+      "expected_claims": [
+        "data engine",
+        "fully automatic"
+      ],
+      "judge_rubric": "Must explain data engine and stages."
+    },
+    {
+      "id": "pdf_sam_automatic_masks_ratio",
+      "question": "What representative numbers does SAM report for automatically generated masks?",
+      "expected_answer": "The answer should mention 1.1B masks and 99.1 percent fully automatically generated.",
+      "expected_document": "segment_anything.pdf",
+      "expected_pages": [
+        6
+      ],
+      "expected_keywords": [
+        "1.1B masks",
+        "99.1%",
+        "fully automatically"
+      ],
+      "expected_evidence_keywords": [
+        "1.1B masks",
+        "99.1%",
+        "fully automatically"
+      ],
+      "expected_claims": [
+        "1.1B",
+        "99.1%"
+      ],
+      "judge_rubric": "Must include 1.1B and 99.1 percent."
+    },
+    {
+      "id": "pdf_nist_ai_rmf_measurement_challenges",
+      "question": "What AI risk measurement challenges does NIST AI RMF 1.0 mention?",
+      "expected_answer": "The answer should mention third-party software, hardware, data, and unresolved risk-tolerance issues.",
+      "expected_document": "nist_ai_rmf_1_0.pdf",
+      "expected_pages": [
+        10,
+        12
+      ],
+      "expected_keywords": [
+        "risk measurement",
+        "third-party",
+        "software",
+        "hardware",
+        "data",
+        "risk tolerances"
+      ],
+      "expected_evidence_keywords": [
+        "risk measurement",
+        "third-party software",
+        "risk tolerances"
+      ],
+      "expected_claims": [
+        "third-party",
+        "risk measurement"
+      ],
+      "judge_rubric": "Must answer from AI RMF risk measurement context."
+    },
+    {
+      "id": "pdf_nist_ai_rmf_accountability_transparency",
+      "question": "How does NIST AI RMF describe accountability and transparency?",
+      "expected_answer": "The answer should mention accountability mechanisms, roles, responsibilities, culture, and transparency governance.",
+      "expected_document": "nist_ai_rmf_1_0.pdf",
+      "expected_pages": [
+        14
+      ],
+      "expected_keywords": [
+        "accountability",
+        "transparent",
+        "roles",
+        "responsibilities",
+        "mechanisms"
+      ],
+      "expected_evidence_keywords": [
+        "accountability mechanisms",
+        "roles and responsibilities"
+      ],
+      "expected_claims": [
+        "accountability mechanisms",
+        "roles and responsibilities"
+      ],
+      "judge_rubric": "Must use AI RMF evidence."
+    },
+    {
+      "id": "pdf_nist_ai_rmf_explainability_interpretability",
+      "question": "What role do explainability and interpretability play in NIST AI RMF?",
+      "expected_answer": "The answer should say they help operators, overseers, and users understand AI system functionality and trustworthiness.",
+      "expected_document": "nist_ai_rmf_1_0.pdf",
+      "expected_pages": [
+        21
+      ],
+      "expected_keywords": [
+        "explainability",
+        "interpretability",
+        "functionality",
+        "trustworthiness"
+      ],
+      "expected_evidence_keywords": [
+        "explainability",
+        "interpretability",
+        "trustworthiness"
+      ],
+      "expected_claims": [
+        "explainability",
+        "interpretability"
+      ],
+      "judge_rubric": "Must explain their role in understanding and trustworthiness."
+    },
+    {
+      "id": "pdf_nist_csf_profiles_use",
+      "question": "What are Organizational Profiles used for in CSF 2.0?",
+      "expected_answer": "The answer should mention current/target cybersecurity outcomes, gaps, and progress assessment.",
+      "expected_document": "nist_cybersecurity_framework_2_0.pdf",
+      "expected_pages": [
+        6,
+        7,
+        11
+      ],
+      "expected_keywords": [
+        "Organizational Profiles",
+        "gaps",
+        "progress",
+        "cybersecurity outcomes"
+      ],
+      "expected_evidence_keywords": [
+        "Profiles",
+        "gaps",
+        "progress"
+      ],
+      "expected_claims": [
+        "gaps",
+        "progress"
+      ],
+      "judge_rubric": "Must explain gap analysis and progress assessment."
+    },
+    {
+      "id": "pdf_nist_csf_tiers_visual",
+      "question": "What does the CSF 2.0 Tiers figure show? Prefer image or vision evidence.",
+      "expected_answer": "The answer should use Fig. 4 or image evidence to explain Tiers for cybersecurity risk governance and management.",
+      "expected_document": "nist_cybersecurity_framework_2_0.pdf",
+      "expected_pages": [
+        13
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "Tiers",
+        "cybersecurity risk governance",
+        "management",
+        "Fig. 4"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Tiers",
+        "risk governance"
+      ],
+      "expected_claims": [
+        "Tiers",
+        "risk governance"
+      ],
+      "judge_rubric": "Must use image or vision evidence."
+    },
+    {
+      "id": "pdf_nist_csf_risk_communication",
+      "question": "How does CSF 2.0 help improve risk management communication and integration?",
+      "expected_answer": "The answer should explain communication across stakeholders and integration with risk management using CSF concepts.",
+      "expected_document": "nist_cybersecurity_framework_2_0.pdf",
+      "expected_pages": [
+        15,
+        16
+      ],
+      "expected_keywords": [
+        "risk management communication",
+        "integration",
+        "stakeholder",
+        "GOVERN"
+      ],
+      "expected_evidence_keywords": [
+        "risk management communication",
+        "integration",
+        "GOVERN"
+      ],
+      "expected_claims": [
+        "risk management communication",
+        "integration"
+      ],
+      "judge_rubric": "Must focus on CSF section about communication and integration."
+    },
+    {
+      "id": "docx_tcp_runtime_screenshot_visual",
+      "question": "What runtime result is shown by the screenshot in network programming experiment 1?",
+      "expected_answer": "The answer should use the DOCX image evidence: server listens on 8888, client connects to 127.0.0.1:8888, sends data, and receives echo.",
+      "expected_document": "doc_84c2596276cf4a70beeb735b1903679f",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "TCP",
+        "8888",
+        "127.0.0.1",
+        "echo",
+        "screenshot"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "8888",
+        "127.0.0.1",
+        "echo"
+      ],
+      "expected_claims": [
+        "8888",
+        "echo"
+      ],
+      "judge_rubric": "Must use DOCX embedded image / vision evidence."
+    },
+    {
+      "id": "docx_portscan_runtime_screenshot_visual",
+      "question": "What did the screenshot in network programming experiment 2 detect?",
+      "expected_answer": "The answer should use the image evidence: PortScan scanned 127.0.0.1 port 8888 and found the port open.",
+      "expected_document": "doc_71f2b9d4a27842759cfe148a159f53d1",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "port scan",
+        "127.0.0.1",
+        "8888",
+        "open",
+        "screenshot"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "127.0.0.1",
+        "8888",
+        "open"
+      ],
+      "expected_claims": [
+        "8888",
+        "open"
+      ],
+      "judge_rubric": "Must cite DOCX screenshot evidence."
+    },
+    {
+      "id": "docx_tcp_winsock_api_sequence",
+      "question": "Which main Winsock APIs does the server use in network programming experiment 1?",
+      "expected_answer": "The answer should list WSAStartup, socket, bind, listen, accept, recv, send, closesocket, and WSACleanup.",
+      "expected_document": "doc_84c2596276cf4a70beeb735b1903679f",
+      "expected_keywords": [
+        "WSAStartup",
+        "socket",
+        "bind",
+        "listen",
+        "accept",
+        "recv",
+        "send",
+        "closesocket"
+      ],
+      "expected_evidence_keywords": [
+        "server API",
+        "WSAStartup",
+        "accept",
+        "recv",
+        "send"
+      ],
+      "expected_claims": [
+        "accept",
+        "recv",
+        "send"
+      ],
+      "judge_rubric": "Must use experiment 1 API list."
+    },
+    {
+      "id": "docx_portscan_connect_logic",
+      "question": "How does network programming experiment 2 use connect() to decide whether a port is open?",
+      "expected_answer": "The answer should say full-connect scanning treats connect success as open and failure/RST as closed.",
+      "expected_document": "doc_71f2b9d4a27842759cfe148a159f53d1",
+      "expected_keywords": [
+        "connect",
+        "full-connect scan",
+        "port open",
+        "RST",
+        "three-way handshake"
+      ],
+      "expected_evidence_keywords": [
+        "connect",
+        "port open",
+        "RST",
+        "three-way handshake"
+      ],
+      "expected_claims": [
+        "connect",
+        "port open"
+      ],
+      "judge_rubric": "Must use experiment 2 scanning principle."
+    },
+    {
+      "id": "multi_pdf_pretraining_objectives_three_way",
+      "question": "Compare the training objectives or supervision signals of BERT, GPT-2, and CLIP.",
+      "expected_answer": "The answer should separately state BERT uses MLM/NSP, GPT-2 uses language modeling and zero-shot evaluation, and CLIP uses image-text natural language supervision / contrastive learning.",
+      "expected_documents": [
+        "bert_pretraining_bidirectional_transformers.pdf",
+        "gpt2_language_models_unsupervised_multitask_learners.pdf",
+        "clip_learning_transferable_visual_models.pdf"
+      ],
+      "required_document_count": 3,
+      "expected_keywords": [
+        "BERT",
+        "MLM",
+        "NSP",
+        "GPT-2",
+        "language model",
+        "CLIP",
+        "contrastive"
+      ],
+      "relation_keywords": [
+        "compare",
+        "difference",
+        "separately"
+      ],
+      "expected_claims": [
+        "MLM",
+        "NSP",
+        "contrastive"
+      ],
+      "expected_relation": "comparison",
+      "judge_rubric": "Must cite all three documents separately."
+    },
+    {
+      "id": "multi_pdf_foundation_model_lineage_gpt2_clip_sam",
+      "question": "GPT-2, CLIP, and SAM all discuss generalization or zero-shot behavior. How do their task boundaries differ?",
+      "expected_answer": "The answer should say GPT-2 is language-task oriented, CLIP is image-text / visual transfer oriented, and SAM is promptable segmentation oriented.",
+      "expected_documents": [
+        "gpt2_language_models_unsupervised_multitask_learners.pdf",
+        "clip_learning_transferable_visual_models.pdf",
+        "segment_anything.pdf"
+      ],
+      "required_document_count": 3,
+      "expected_keywords": [
+        "GPT-2",
+        "CLIP",
+        "SAM",
+        "zero-shot",
+        "language",
+        "vision",
+        "segmentation"
+      ],
+      "relation_keywords": [
+        "common",
+        "different",
+        "boundary"
+      ],
+      "expected_claims": [
+        "language",
+        "segmentation",
+        "vision"
+      ],
+      "expected_relation": "comparison",
+      "judge_rubric": "Must distinguish all three task boundaries."
+    },
+    {
+      "id": "multi_pdf_attention_bert_gpt2_transformer_lineage",
+      "question": "Can Attention, BERT, and GPT-2 be read as a Transformer-related technical lineage? Cite each separately.",
+      "expected_answer": "The answer should say Attention proposes Transformer, BERT uses deep bidirectional Transformer encoders, and GPT-2 is a large language model in the GPT/Transformer LM line, without treating them as one paper.",
+      "expected_documents": [
+        "attention_is_all_you_need.pdf",
+        "bert_pretraining_bidirectional_transformers.pdf",
+        "gpt2_language_models_unsupervised_multitask_learners.pdf"
+      ],
+      "required_document_count": 3,
+      "expected_keywords": [
+        "Transformer",
+        "BERT",
+        "GPT-2",
+        "language model",
+        "pre-training"
+      ],
+      "relation_keywords": [
+        "lineage",
+        "foundation",
+        "separately"
+      ],
+      "expected_claims": [
+        "Transformer",
+        "BERT",
+        "language model"
+      ],
+      "forbidden_claims": [
+        "same paper"
+      ],
+      "expected_relation": "support",
+      "judge_rubric": "Explain lineage without mixing document identities."
+    },
+    {
+      "id": "multi_pdf_cyber_ai_risk_governance_scope",
+      "question": "AI RMF and CSF both discuss risk governance. Can they directly replace each other?",
+      "expected_answer": "The answer should say no: AI RMF is for AI risk management and CSF is for cybersecurity risk governance; they are analogous but scoped differently.",
+      "expected_documents": [
+        "nist_ai_rmf_1_0.pdf",
+        "nist_cybersecurity_framework_2_0.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "AI RMF",
+        "CSF",
+        "risk",
+        "governance",
+        "not replace",
+        "scope"
+      ],
+      "relation_keywords": [
+        "same term",
+        "different",
+        "boundary"
+      ],
+      "expected_claims": [
+        "AI risk",
+        "cybersecurity risk"
+      ],
+      "forbidden_claims": [
+        "directly replace"
+      ],
+      "expected_relation": "same_term_different_context",
+      "judge_rubric": "Must distinguish AI risk from cybersecurity risk."
+    },
+    {
+      "id": "multi_docx_tcp_portscan_relation",
+      "question": "What is the relationship and difference between TCP echo experiment 1 and port scanning experiment 2?",
+      "expected_answer": "The answer should say both use Winsock/TCP, while experiment 1 implements client-server echo and experiment 2 uses connect full scans to detect open ports.",
+      "expected_documents": [
+        "doc_84c2596276cf4a70beeb735b1903679f",
+        "doc_71f2b9d4a27842759cfe148a159f53d1"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "TCP",
+        "echo",
+        "port scan",
+        "connect",
+        "Winsock"
+      ],
+      "relation_keywords": [
+        "relationship",
+        "difference",
+        "common"
+      ],
+      "expected_claims": [
+        "echo",
+        "port scan"
+      ],
+      "expected_relation": "comparison",
+      "judge_rubric": "Must cite both DOCX documents."
+    },
+    {
+      "id": "mixed_docx_pdf_clip_not_tcp_ai_claim",
+      "question": "Can the CLIP paper prove that the TCP echo program in experiment 1 has zero-shot visual ability?",
+      "expected_answer": "The answer should refuse the positive claim: CLIP covers image-text zero-shot models, while experiment 1 is a TCP echo program with no direct evidence chain.",
+      "expected_documents": [
+        "clip_learning_transferable_visual_models.pdf",
+        "doc_84c2596276cf4a70beeb735b1903679f"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "cannot prove",
+        "CLIP",
+        "TCP",
+        "zero-shot",
+        "direct evidence"
+      ],
+      "relation_keywords": [
+        "boundary",
+        "cannot prove"
+      ],
+      "expected_claims": [
+        "CLIP",
+        "TCP"
+      ],
+      "forbidden_claims": [
+        "TCP echo program has zero-shot visual ability"
+      ],
+      "expected_relation": "boundary",
+      "expected_refusal": true,
+      "judge_rubric": "Must refuse unsupported cross-document inference."
+    },
+    {
+      "id": "insufficient_csf_medical_diagnosis_claim",
+      "question": "Does NIST CSF 2.0 prove that a medical diagnosis model improved accuracy?",
+      "expected_answer": "The answer should refuse: CSF is a cybersecurity framework and does not contain medical diagnosis accuracy experiments.",
+      "expected_document": "nist_cybersecurity_framework_2_0.pdf",
+      "expected_keywords": [
+        "cannot prove",
+        "medical diagnosis",
+        "accuracy",
+        "no evidence"
+      ],
+      "expected_claims": [
+        "CSF",
+        "medical diagnosis"
+      ],
+      "forbidden_claims": [
+        "accuracy improved"
+      ],
+      "expected_relation": "boundary",
+      "expected_refusal": true,
+      "judge_rubric": "Must refuse unsupported medical claim."
+    },
+    {
+      "id": "insufficient_scanned_product_not_nlp_benchmark",
+      "question": "Can ocrmypdf_cardinal_scanned.pdf prove that GPT-2 achieved new SOTA on LAMBADA?",
+      "expected_answer": "The answer should refuse: the scanned PDF is a LinnSequencer product page, not GPT-2 benchmark evidence.",
+      "expected_documents": [
+        "ocrmypdf_cardinal_scanned.pdf",
+        "gpt2_language_models_unsupervised_multitask_learners.pdf"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "cannot prove",
+        "LinnSequencer",
+        "GPT-2",
+        "LAMBADA",
+        "direct evidence"
+      ],
+      "expected_claims": [
+        "LinnSequencer",
+        "GPT-2"
+      ],
+      "forbidden_claims": [
+        "scanned PDF proves GPT-2 SOTA"
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_relation": "boundary",
+      "expected_refusal": true,
+      "judge_rubric": "Must identify scanned PDF content boundary."
+    },
+    {
+      "id": "insufficient_no_financial_prediction",
+      "question": "Can these documents prove that a stock will definitely rise next month?",
+      "expected_answer": "The answer should refuse: the corpus contains AI, cybersecurity, scanned product, and lab-report materials, not stock prediction evidence.",
+      "expected_documents": [
+        "attention_is_all_you_need.pdf",
+        "nist_ai_rmf_1_0.pdf",
+        "doc_84c2596276cf4a70beeb735b1903679f"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "cannot prove",
+        "stock",
+        "rise",
+        "no evidence"
+      ],
+      "expected_claims": [
+        "stock",
+        "no evidence"
+      ],
+      "forbidden_claims": [
+        "definitely rise"
+      ],
+      "expected_relation": "boundary",
+      "expected_refusal": true,
+      "judge_rubric": "Must refuse unsupported financial prediction."
+    },
+    {
+      "id": "insufficient_docx_no_udp_implementation",
+      "question": "Do the two network programming DOCX files prove that UDP communication has been implemented?",
+      "expected_answer": "The answer should refuse: experiment 1 is TCP echo and experiment 2 is TCP full-connect port scanning, not UDP implementation.",
+      "expected_documents": [
+        "doc_84c2596276cf4a70beeb735b1903679f",
+        "doc_71f2b9d4a27842759cfe148a159f53d1"
+      ],
+      "required_document_count": 2,
+      "expected_keywords": [
+        "cannot prove",
+        "UDP",
+        "TCP",
+        "port scan",
+        "echo"
+      ],
+      "expected_claims": [
+        "UDP",
+        "TCP"
+      ],
+      "forbidden_claims": [
+        "implemented UDP communication"
+      ],
+      "expected_relation": "boundary",
+      "expected_refusal": true,
+      "judge_rubric": "Must distinguish TCP experiments from UDP implementation."
+    },
+    {
+      "id": "pdf_scanned_contact_info_visual_ocr",
+      "question": "Can the scanned PDF show that the LinnSequencer product page contains manufacturer contact information? Use image text or vision evidence.",
+      "expected_answer": "The answer should say the image/vision summary shows Linn Electronics address, phone, or telex/contact information on the product page.",
+      "expected_document": "ocrmypdf_cardinal_scanned.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "image",
+        "vision",
+        "ocr"
+      ],
+      "expected_keywords": [
+        "Linn Electronics",
+        "address",
+        "phone",
+        "telex",
+        "vision"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "Linn Electronics",
+        "address",
+        "phone"
+      ],
+      "expected_claims": [
+        "Linn Electronics",
+        "contact"
+      ],
+      "judge_rubric": "Must use scanned-page image / vision evidence."
+    },
+    {
+      "id": "pdf_scanned_product_not_research_paper",
+      "question": "Is ocrmypdf_cardinal_scanned.pdf more like a research paper or a product sheet? Give evidence.",
+      "expected_answer": "The answer should say it is more like a LinnSequencer 32-track MIDI product description / promotional sheet, not a research paper.",
+      "expected_document": "ocrmypdf_cardinal_scanned.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "image",
+        "vision"
+      ],
+      "expected_keywords": [
+        "LinnSequencer",
+        "32",
+        "MIDI",
+        "product sheet",
+        "not research paper"
+      ],
+      "expected_evidence_keywords": [
+        "Image evidence",
+        "LinnSequencer",
+        "MIDI",
+        "product"
+      ],
+      "expected_claims": [
+        "product",
+        "not research paper"
+      ],
+      "judge_rubric": "Must identify document type from visual summary."
+    }
+  ]
+}

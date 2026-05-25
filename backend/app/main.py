@@ -5,7 +5,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -26,11 +26,13 @@ from backend.app.models import (
     DocumentImageInfo,
     EvidenceItem,
     EvaluationRun,
+    EvaluationRunRequest,
     ModelCatalog,
     ModelPreset,
     TaskInfo,
     UploadResponse,
 )
+from backend.app.observability import ObservabilityClient
 from backend.app.storage import MetadataStore, new_id
 from backend.app.vector_store import ChromaPaperStore
 
@@ -42,6 +44,7 @@ store = MetadataStore(settings.sqlite_path)
 model_clients = ModelClients(settings)
 vector_store = ChromaPaperStore(settings.chroma_dir)
 memory = MemoryManager(store)
+observer = ObservabilityClient(settings)
 indexer = DocumentIndexer(
     settings=settings,
     store=store,
@@ -54,6 +57,7 @@ agent = PaperAgentService(
     vector_store=vector_store,
     model_clients=model_clients,
     memory=memory,
+    observer=observer,
 )
 
 app = FastAPI(title=settings.app_name)
@@ -360,14 +364,53 @@ def _stream_event(event_type: str, payload: object) -> str:
 
 
 @app.post("/api/evaluation/run", response_model=EvaluationRun)
-def run_evaluation(document_ids: list[str]) -> EvaluationRun:
-    suite_path = settings.project_root / "evals" / "sample_eval_set.json"
+def run_evaluation(request: EvaluationRunRequest | list[str] = Body(...)) -> EvaluationRun:
+    if isinstance(request, list):
+        request = EvaluationRunRequest(document_ids=request)
+    suite_path = _resolve_eval_suite_path(request)
     cases = load_eval_suite(suite_path)
+    if request.case_ids:
+        wanted = set(request.case_ids)
+        cases = [case for case in cases if case.id in wanted]
+    if request.limit is not None:
+        cases = cases[: max(request.limit, 0)]
     if not cases:
         raise HTTPException(status_code=404, detail="没有找到评测集。")
+    document_ids = request.document_ids or [
+        document.id for document in store.list_documents() if document.status == "ready"
+    ]
+    if not document_ids:
+        raise HTTPException(status_code=400, detail="没有可用于评测的已就绪文档。")
     return run_eval_suite(
-        suite_name=suite_path.stem,
+        suite_name=request.suite_name or suite_path.stem,
         cases=cases,
         agent=agent,
         document_ids=document_ids,
+        observer=observer,
+        enable_judge=request.enable_judge,
+        model_preset=request.model_preset,
+        chat_model=request.chat_model,
+        embedding_model=request.embedding_model,
+        top_k=request.top_k,
     )
+
+
+def _resolve_eval_suite_path(request: EvaluationRunRequest) -> Path:
+    if request.suite_path:
+        candidate = Path(request.suite_path)
+        if not candidate.is_absolute():
+            candidate = settings.project_root / candidate
+    else:
+        suite_name = (request.suite_name or "sample_eval_set").strip()
+        if not suite_name.endswith(".json"):
+            suite_name = f"{suite_name}.json"
+        candidate = settings.project_root / "evals" / suite_name
+    resolved = candidate.resolve()
+    eval_root = (settings.project_root / "evals").resolve()
+    try:
+        is_allowed = resolved.is_relative_to(eval_root)
+    except AttributeError:
+        is_allowed = str(resolved).startswith(str(eval_root))
+    if not is_allowed:
+        raise HTTPException(status_code=400, detail="评测集必须放在 evals 目录下。")
+    return resolved

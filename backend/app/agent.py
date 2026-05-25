@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -22,6 +23,7 @@ from backend.app.config import Settings
 from backend.app.llm_clients import ModelClients
 from backend.app.memory import MemoryManager
 from backend.app.models import AskRequest, AskResponse, EvidenceItem, RagTrace, RelatedImageInfo, RuntimeStep
+from backend.app.observability import ObservabilityClient
 from backend.app.storage import MetadataStore
 from backend.app.vector_store import ChromaPaperStore
 
@@ -50,12 +52,14 @@ class PaperAgentService(
         vector_store: ChromaPaperStore,
         model_clients: ModelClients,
         memory: MemoryManager,
+        observer: ObservabilityClient | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
         self.vector_store = vector_store
         self.model_clients = model_clients
         self.memory = memory
+        self.observer = observer
         self.graph = self._build_graph()
 
     def ask(self, request: AskRequest) -> AskResponse:
@@ -70,6 +74,7 @@ class PaperAgentService(
         return final_response
 
     def stream(self, request: AskRequest) -> Iterator[AgentEvent]:
+        started = time.perf_counter()
         conversation = self.store.ensure_conversation(
             request.conversation_id,
             title=request.question,
@@ -116,6 +121,12 @@ class PaperAgentService(
             model_profile=preset.label,
             top_k=int(final_state.get("top_k", top_k) or top_k),
         )
+        if self.observer is not None:
+            self.observer.record_rag_run(
+                request=request,
+                response=response,
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+            )
         yield final_event(response)
 
     def _build_response_from_state(
@@ -129,12 +140,16 @@ class PaperAgentService(
         evidence = state.get("evidence", [])
         answer = state.get("answer", "本轮没有生成可用回答。")
         visible_evidence = self.attach_related_images(
-            self._visible_evidence_for_answer(answer, evidence)
+            self._visible_evidence_for_answer(answer, evidence),
+            question=request.question,
         )
         runtime = state.get("runtime", [])
         final_prompt_evidence = state.get("final_prompt_evidence", [])
         evidence_judgments = state.get("evidence_judgments", [])
         verification = state.get("verification", {})
+        multi_document_cards = state.get("multi_document_cards", [])
+        document_relation_map = state.get("document_relation_map", [])
+        multi_document_coverage = state.get("multi_document_coverage", {})
         compound_tasks = state.get("compound_tasks") or []
         task_parse_reason = state.get("task_parse_reason") or ""
         intent = state.get("intent") or self._classify_question_intent(request.question)
@@ -187,6 +202,13 @@ class PaperAgentService(
         )
         self.memory.refresh_conversation_summary(conversation_id)
 
+        retrieval_document_ids = state.get("retrieval_document_ids") or request.document_ids
+        visual_ocr_warnings = state.get("visual_ocr_warnings") or self._build_visual_ocr_warnings(
+            question=request.question,
+            evidence=visible_evidence,
+            document_ids=retrieval_document_ids,
+        )
+
         return AskResponse(
             answer=answer,
             conversation_id=conversation_id,
@@ -197,7 +219,7 @@ class PaperAgentService(
                 vector_store=self.vector_store.name,
                 vector_record_count=self.vector_store.count(),
                 top_k=top_k,
-                filter_document_ids=request.document_ids,
+                filter_document_ids=retrieval_document_ids,
                 retrieved_count=len(evidence),
                 final_prompt_evidence=final_prompt_evidence,
                 intent=intent,
@@ -213,6 +235,10 @@ class PaperAgentService(
                 task_parse_reason=task_parse_reason,
                 evidence_judgments=evidence_judgments,
                 verification=verification,
+                multi_document_cards=multi_document_cards,
+                document_relation_map=document_relation_map,
+                multi_document_coverage=multi_document_coverage,
+                visual_ocr_warnings=visual_ocr_warnings,
             ),
             memory_used=self.memory.build_memory_context(conversation_id, question=request.question),
         )
@@ -227,7 +253,12 @@ class PaperAgentService(
             return []
         return [item for item in evidence if item.citation_id in cited_ids]
 
-    def attach_related_images(self, evidence: list[EvidenceItem]) -> list[EvidenceItem]:
+    def attach_related_images(
+        self,
+        evidence: list[EvidenceItem],
+        *,
+        question: str = "",
+    ) -> list[EvidenceItem]:
         if not evidence:
             return []
         image_cache: dict[str, list[dict[str, Any]]] = {}
@@ -239,7 +270,7 @@ class PaperAgentService(
                 continue
             if document_id not in image_cache:
                 image_cache[document_id] = self.store.list_document_images(document_id)
-            related = self._related_images_for_evidence(item, image_cache[document_id])
+            related = self._related_images_for_evidence(item, image_cache[document_id], question=question)
             enriched.append(item.model_copy(update={"related_images": related}))
         return enriched
 
@@ -248,14 +279,17 @@ class PaperAgentService(
         item: EvidenceItem,
         images: list[dict[str, Any]],
         *,
-        limit: int = 6,
+        question: str = "",
+        limit: int = 2,
     ) -> list[RelatedImageInfo]:
+        if item.image_id or "image" in (item.chunk_type or "").lower() or "figure" in (item.chunk_type or "").lower():
+            return []
         page_start = int(item.page_start or item.page or 0)
         page_end = int(item.page_end or page_start)
         if not page_start:
             return []
 
-        related: list[RelatedImageInfo] = []
+        scored_related: list[tuple[float, RelatedImageInfo]] = []
         for image in images:
             image_id = str(image.get("id", ""))
             if item.image_id and image_id == item.image_id:
@@ -264,7 +298,15 @@ class PaperAgentService(
             image_end = int(image.get("page_end", image_start) or image_start)
             if image_end < page_start or image_start > page_end:
                 continue
-            related.append(
+            relevance = self._related_image_relevance_score(
+                question=question,
+                evidence=item,
+                image=image,
+            )
+            if relevance < 0.28:
+                continue
+            scored_related.append((
+                relevance,
                 RelatedImageInfo(
                     id=image_id,
                     document_id=str(image.get("document_id", item.document_id)),
@@ -276,10 +318,169 @@ class PaperAgentService(
                     vision_summary=str(image.get("vision_summary") or ""),
                     status=str(image.get("status") or ""),
                 )
+            ))
+        scored_related.sort(key=lambda row: row[0], reverse=True)
+        return [image for _, image in scored_related[:limit]]
+
+    def _build_visual_ocr_warnings(
+        self,
+        *,
+        question: str,
+        evidence: list[EvidenceItem],
+        document_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        expects_visual = self._looks_like_visual_retrieval_question(question)
+        expects_ocr = self._looks_like_ocr_question(question)
+        if not expects_visual and not expects_ocr:
+            return []
+
+        warnings: list[dict[str, Any]] = []
+        evidence_document_ids = [item.document_id for item in evidence if item.document_id]
+        target_document_ids = list(dict.fromkeys(evidence_document_ids or document_ids))
+        if expects_visual and not any(self._evidence_has_image_signal(item) for item in evidence):
+            warnings.append(
+                {
+                    "type": "visual_expected_but_not_cited",
+                    "severity": "warn",
+                    "message": "问题需要图片/视觉证据，但最终引用里没有图片型证据。",
+                }
             )
-            if len(related) >= limit:
-                break
-        return related
+
+        for document_id in target_document_ids:
+            if not document_id:
+                continue
+            images = self.store.list_document_images(document_id)
+            document = self.store.get_document(document_id)
+            paper_name = document.file_name if document else document_id
+            if not images:
+                warnings.append(
+                    {
+                        "type": "visual_expected_no_extracted_images",
+                        "severity": "warn",
+                        "document_id": document_id,
+                        "paper_name": paper_name,
+                        "message": "问题需要图片/OCR 证据，但该文档没有已抽取图片记录。",
+                    }
+                )
+                continue
+
+            status_counts: dict[str, int] = {}
+            for image in images:
+                status = str(image.get("status") or "unknown")
+                status_counts[status] = status_counts.get(status, 0) + 1
+            vision_ready_count = sum(1 for image in images if str(image.get("status") or "") == "vision_ready")
+            ocr_text_count = sum(1 for image in images if str(image.get("ocr_text") or "").strip())
+            unfinished_count = sum(
+                count
+                for status, count in status_counts.items()
+                if status not in {"vision_ready", "ready"}
+            )
+
+            if expects_visual and vision_ready_count == 0:
+                warnings.append(
+                    {
+                        "type": "visual_expected_without_vision_ready_images",
+                        "severity": "warn",
+                        "document_id": document_id,
+                        "paper_name": paper_name,
+                        "image_count": len(images),
+                        "status_counts": status_counts,
+                        "message": "问题需要视觉理解，但该文档图片尚无 vision_ready 记录，回答可能只依赖题注/OCR 或普通文本。",
+                    }
+                )
+            if expects_ocr and ocr_text_count == 0:
+                severity = "info" if vision_ready_count else "warn"
+                warnings.append(
+                    {
+                        "type": "ocr_expected_without_ocr_text",
+                        "severity": severity,
+                        "document_id": document_id,
+                        "paper_name": paper_name,
+                        "image_count": len(images),
+                        "vision_ready_count": vision_ready_count,
+                        "status_counts": status_counts,
+                        "message": "问题涉及 OCR/扫描文本，但图片记录中没有 OCR 文本；当前会退化为视觉摘要或图片证据。",
+                    }
+                )
+            if unfinished_count and (expects_visual or expects_ocr):
+                warnings.append(
+                    {
+                        "type": "image_processing_incomplete",
+                        "severity": "info",
+                        "document_id": document_id,
+                        "paper_name": paper_name,
+                        "image_count": len(images),
+                        "unfinished_count": unfinished_count,
+                        "status_counts": status_counts,
+                        "message": "该文档仍有图片处于未完全视觉化/OCR 化状态，必要时应重新索引或提高视觉处理上限。",
+                    }
+                )
+        return warnings
+
+    def _evidence_has_image_signal(self, item: EvidenceItem) -> bool:
+        chunk_type = (item.chunk_type or "").lower()
+        return bool(item.image_id or item.image_path or item.related_images) or any(
+            marker in chunk_type for marker in ["image", "figure", "chart"]
+        )
+
+    def _looks_like_ocr_question(self, question: str) -> bool:
+        normalized = question.lower()
+        return any(
+            keyword in normalized
+            for keyword in ["ocr", "扫描", "文字识别", "图片里的文字", "图中文字", "纯文字", "text layer", "文本层"]
+        )
+
+    def _related_image_relevance_score(
+        self,
+        *,
+        question: str,
+        evidence: EvidenceItem,
+        image: dict[str, Any],
+    ) -> float:
+        image_text = self._related_image_text(image)
+        if not image_text:
+            return 0.0
+        evidence_focus = self._truncate_readable_text(
+            " ".join(part for part in [evidence.quote, evidence.text] if part),
+            limit=520,
+        )
+        question_score = self._question_relevance_score(question, image_text) if question else 0.0
+        evidence_score = self._question_relevance_score(evidence_focus, image_text)
+        shared_score = self._shared_visual_keyword_score(
+            question=question,
+            evidence_focus=evidence_focus,
+            image_text=image_text,
+        )
+        content_bonus = 0.06 if str(image.get("vision_summary") or "").strip() else 0.0
+        content_bonus += 0.04 if str(image.get("ocr_text") or "").strip() else 0.0
+        return min(1.0, question_score * 0.35 + evidence_score * 0.45 + shared_score * 0.35 + content_bonus)
+
+    def _related_image_text(self, image: dict[str, Any]) -> str:
+        return self._sanitize_evidence_text(
+            " ".join(
+                str(image.get(field) or "")
+                for field in ["caption_text", "ocr_text", "vision_summary", "kind"]
+            )
+        ).strip()
+
+    def _shared_visual_keyword_score(
+        self,
+        *,
+        question: str,
+        evidence_focus: str,
+        image_text: str,
+    ) -> float:
+        terms = [
+            term
+            for term in [*self._question_keywords(question), *self._question_keywords(evidence_focus)]
+            if len(term.strip()) >= 2
+        ]
+        unique_terms = list(dict.fromkeys(terms))[:24]
+        if not unique_terms:
+            return 0.0
+        normalized_image = image_text.lower()
+        hits = sum(1 for term in unique_terms if term in image_text or term.lower() in normalized_image)
+        return min(1.0, hits / max(min(len(unique_terms), 8), 1))
 
     def _resolve_chat_model(self, requested_model: str | None, preset_model: str) -> str:
         options = set(self.settings.chat_model_options)

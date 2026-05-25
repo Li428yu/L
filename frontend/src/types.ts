@@ -142,6 +142,49 @@ export interface VerificationTrace {
   uncited_answer?: boolean;
 }
 
+export interface VisualOcrWarning {
+  type: string;
+  severity: "info" | "warn" | string;
+  document_id?: string;
+  paper_name?: string;
+  image_count?: number;
+  vision_ready_count?: number;
+  unfinished_count?: number;
+  status_counts?: Record<string, number>;
+  message: string;
+}
+
+export interface MultiDocumentCard {
+  document_id: string;
+  paper_name: string;
+  covered: boolean;
+  evidence_count: number;
+  citation_ids: string[];
+  pages: string[];
+  key_terms: string[];
+  roles: Array<{
+    role: string;
+    label: string;
+    score: number;
+  }>;
+  best_quote?: string;
+  evidence_types?: string[];
+  image_evidence_count?: number;
+}
+
+export interface DocumentRelationItem {
+  source_document_id: string;
+  target_document_id: string;
+  source_name: string;
+  target_name: string;
+  relation_type: string;
+  relation_label: string;
+  shared_terms: string[];
+  source_citations: string[];
+  target_citations: string[];
+  summary: string;
+}
+
 export interface RagTrace {
   model_profile: string;
   vector_store: string;
@@ -163,6 +206,10 @@ export interface RagTrace {
   task_parse_reason?: string;
   evidence_judgments?: EvidenceJudgment[];
   verification?: VerificationTrace;
+  multi_document_cards?: MultiDocumentCard[];
+  document_relation_map?: DocumentRelationItem[];
+  multi_document_coverage?: Record<string, unknown>;
+  visual_ocr_warnings?: VisualOcrWarning[];
 }
 
 export interface AskResponse {

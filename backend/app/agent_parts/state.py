@@ -35,6 +35,10 @@ class PaperAgentState(TypedDict, total=False):
     task_parse_reason: str
     evidence_judgments: list[dict[str, Any]]
     verification: dict[str, Any]
+    multi_document_cards: list[dict[str, Any]]
+    document_relation_map: list[dict[str, Any]]
+    multi_document_coverage: dict[str, Any]
+    visual_ocr_warnings: list[dict[str, Any]]
 
 
 @dataclass

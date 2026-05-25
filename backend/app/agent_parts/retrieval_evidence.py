@@ -58,7 +58,14 @@ class AgentRetrievalEvidenceMixin:
         score_source: str = "rule",
     ) -> EvidenceItem:
         metadata = row["metadata"]
-        text = str(metadata.get("parent_text") or row["text"])
+        chunk_type = str(metadata.get("chunk_type") or "text")
+        is_self_contained = (
+            "table" in chunk_type.lower()
+            or "image" in chunk_type.lower()
+            or "figure" in chunk_type.lower()
+            or "chart" in chunk_type.lower()
+        )
+        text = str(row["text"] if is_self_contained else metadata.get("parent_text") or row["text"])
         quote = self._best_readable_quote(str(metadata.get("quote", "")) or text)
         resolved_final_score = final_score if final_score is not None else score
         resolved_rule_score = rule_score
@@ -92,8 +99,11 @@ class AgentRetrievalEvidenceMixin:
             char_start=int(metadata.get("parent_char_start", metadata.get("char_start", 0)) or 0),
             char_end=int(metadata.get("parent_char_end", metadata.get("char_end", 0)) or 0),
             token_count=int(metadata.get("parent_token_count", metadata.get("token_count", 0)) or 0),
-            chunk_type=str(metadata.get("chunk_type") or "text"),
+            chunk_type=chunk_type,
             parent_id=str(metadata.get("parent_id") or "") or None,
+            image_id=str(metadata.get("image_id") or "") or None,
+            image_path=str(metadata.get("image_path") or "") or None,
+            bbox_json=str(metadata.get("bbox_json") or "") or None,
         )
 
     def _renumber_evidence(self, evidence: list[EvidenceItem]) -> list[EvidenceItem]:

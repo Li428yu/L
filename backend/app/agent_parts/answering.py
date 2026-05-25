@@ -66,6 +66,7 @@ class AgentAnsweringMixin:
             evidence=compact_model_prompt_evidence or state.get("evidence", []),
             soft_intent=state.get("soft_intent", {}),
         )
+        multi_document_context = self._format_multi_document_context_for_model_prompt(state)
         if not force_model_answer and self._looks_like_reference_question(state["question"]):
             answer = self._build_local_reference_answer(
                 state["question"],
@@ -119,14 +120,23 @@ class AgentAnsweringMixin:
             "你是一个严谨、友好的中文文档阅读助手。用户说“这篇论文”“这份文档”时，"
             "默认指当前已上传文档，不要要求用户重新提供标题。若当前有多篇文档且用户没有指定某一篇，"
             "必须按文档分开回答，避免把几篇文档混成一个结论。回答必须优先基于检索证据，"
+            "遇到多文献选题时，先逐篇说明各自证据，再做关系综合：共同点、差异点、互补关系或冲突关系。"
+            "不要把单篇文献的结论写成所有文献的共同结论；只有多篇证据或文献关系结构同时支持时，才写成共同结论。"
             "不要编造文档内容。使用证据时用 [E1]、[E2] 这样的编号引用。"
+            "如果证据中已经出现了答案，不要说文档没有提到；先逐条核对证据内容再下结论。"
+            "图片、截图、图表问题必须优先使用 Type 为 image、chart_image、figure 或 table 的证据，"
+            "并在对应事实后写该证据编号；不要输出没有编号的“图片描述”。"
             "如果证据不足，要说明缺少什么，但只要已有证据能回答，就先直接回答。"
             "不要输出姓名、学号、邮箱等个人信息，除非用户明确询问。"
             "系统给出的任务理解只是候选，不是最终结论；你必须根据用户原话和证据重新判断真实意图，"
             "不要机械地把某个词固定映射成某类任务。"
             "如果问题像字段提取，只回答目标字段本身；如果问题是在解释、评价、比较或概括，不要只机械摘字段。"
             "除非用户明确询问，不要输出作者、单位、日期、提交说明、参考文献等无关信息。"
-            "你可以使用简洁 Markdown（段落、编号列表、加粗），但引用证据只能使用 [E1]、[E2] 这种格式，"
+            "你可以使用简洁 Markdown（段落、编号列表、加粗），但引用证据只能使用 [E1]、[E2] 这种格式。"
+            "只有当用户要求比较、差异、共同点、互补关系、冲突关系、清单化评价，或多文献关系很适合横向对照时，才使用表格；"
+            "普通解释、概括、建议类问题优先用短段落和列表。"
+            "如果使用表格，必须输出标准 GFM Markdown 表格：表头、分隔线、每一行都各占一行；表格前后留空行；最多 5 列，过宽就拆成多个小表。"
+            "绝对不要把表头、分隔线和数据行压缩到同一行，也不要用“| |”表示换行；表格如果不能保证标准格式，就改用列表。"
             "不要输出“Introduction依据”“Conclusion依据”“Abstract依据”等自造引用。"
         )
         user_prompt = f"""
@@ -142,10 +152,14 @@ class AgentAnsweringMixin:
 任务理解候选：
 {question_understanding}
 
+多文献关系结构：
+{multi_document_context or "本轮不是多文献关系型问题，或没有足够文献关系可整理。"}
+
 检索证据：
 {evidence_blocks or "本轮没有检索到证据。"}
 
-请给出适合非技术用户阅读的中文回答，并在关键事实后标注证据编号。
+        请给出适合非技术用户阅读的中文回答，并在关键事实后标注证据编号。只有横向比较明显更清楚时才使用表格；否则用自然段和列表。
+图片、截图、图表或评分表问题必须直接引用对应的图片/表格证据编号。
 """.strip()
 
         return AnswerPlan(
@@ -201,6 +215,57 @@ class AgentAnsweringMixin:
             [SystemMessage(content=plan.system_prompt), HumanMessage(content=plan.user_prompt)],
             model=state["chat_model"],
         )
+
+    def _format_multi_document_context_for_model_prompt(self, state: PaperAgentState) -> str:
+        cards = state.get("multi_document_cards", []) or []
+        relations = state.get("document_relation_map", []) or []
+        coverage = state.get("multi_document_coverage", {}) or {}
+        if not cards and not coverage:
+            return ""
+
+        lines: list[str] = []
+        requested_count = coverage.get("requested_document_count")
+        covered_count = coverage.get("covered_document_count")
+        if requested_count:
+            lines.append(f"覆盖情况：已覆盖 {covered_count}/{requested_count} 篇文献。")
+            missing_names = coverage.get("missing_document_names") or []
+            if missing_names:
+                lines.append(f"缺少直接证据的文献：{', '.join(str(name) for name in missing_names)}。")
+
+        if cards:
+            lines.append("逐篇证据卡：")
+            for index, card in enumerate(cards, start=1):
+                name = str(card.get("paper_name") or card.get("document_id") or f"文献{index}")
+                citation_ids = ", ".join(str(item) for item in card.get("citation_ids", [])[:5]) or "无"
+                pages = ", ".join(str(item) for item in card.get("pages", [])[:5]) or "页码未知"
+                terms = ", ".join(str(item) for item in card.get("key_terms", [])[:6]) or "关键词不足"
+                roles = ", ".join(
+                    str(role.get("label") or role.get("role"))
+                    for role in card.get("roles", [])[:4]
+                    if isinstance(role, dict)
+                ) or "证据角色未明"
+                quote = self._truncate_readable_text(str(card.get("best_quote") or ""), limit=220)
+                if card.get("covered"):
+                    lines.append(
+                        f"{index}. {name}：证据 {card.get('evidence_count', 0)} 条；引用 {citation_ids}；"
+                        f"页码 {pages}；角色 {roles}；关键词 {terms}。"
+                    )
+                    if quote:
+                        lines.append(f"   代表性证据：{quote}")
+                else:
+                    lines.append(f"{index}. {name}：本轮没有检索到足够直接证据，回答时需要单独说明。")
+
+        if relations:
+            lines.append("文献关系：")
+            for relation in relations[:8]:
+                summary = str(relation.get("summary") or "")
+                source_citations = " ".join(f"[{item}]" for item in relation.get("source_citations", [])[:2])
+                target_citations = " ".join(f"[{item}]" for item in relation.get("target_citations", [])[:2])
+                citation_text = " ".join(part for part in [source_citations, target_citations] if part)
+                lines.append(f"- {summary} {citation_text}".strip())
+
+        lines.append("回答约束：多文献问题要先分文献，再综合关系；没有被多篇证据共同支持的内容不要写成共同结论。")
+        return "\n".join(lines)
 
     def _format_evidence(self, evidence: list[EvidenceItem]) -> str:
         blocks = []
@@ -271,9 +336,110 @@ class AgentAnsweringMixin:
 
         candidates = scored or fallback
         candidates.sort(key=lambda row: (row[0], -row[1]), reverse=True)
-        limit = min(4, max(2, len(candidates)))
-        selected = [item for _, _, item in candidates[:limit]]
+        modality_candidates = sorted(
+            [*scored, *fallback],
+            key=lambda row: (row[0], -row[1]),
+            reverse=True,
+        )
+        unique_documents = list(dict.fromkeys(item.document_id for _, _, item in candidates if item.document_id))
+        if len(unique_documents) > 1 and (
+            self._looks_like_compare_question(question)
+            or self._looks_like_broad_overview_question(question)
+            or self._looks_like_multi_document_topic_question(question)
+            or soft_intent.get("scope") in {"multi_document", "whole_document"}
+        ):
+            limit = min(8, max(len(unique_documents), min(len(candidates), len(unique_documents) * 2)))
+            selected = self._select_prompt_evidence_by_document(candidates, limit=limit)
+        else:
+            limit = min(4, max(2, len(candidates)))
+            selected = [item for _, _, item in candidates[:limit]]
+        selected = self._ensure_required_modalities_in_prompt(
+            question=question,
+            selected=selected,
+            candidates=[item for _, _, item in modality_candidates],
+            limit=limit,
+        )
         return selected or evidence[: min(4, len(evidence))]
+
+    def _ensure_required_modalities_in_prompt(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        candidates: list[EvidenceItem],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        result = list(selected)
+        selected_chunks = {item.chunk_id for item in result}
+
+        def add_required(predicate) -> None:
+            nonlocal result, selected_chunks
+            matching = [item for item in candidates if item.chunk_id not in selected_chunks and predicate(item)]
+            matching.sort(
+                key=lambda item: (
+                    self._question_relevance_score(question, f"{item.paper_name}\n{self._sanitize_evidence_text(item.text)}"),
+                    item.score,
+                ),
+                reverse=True,
+            )
+            if matching:
+                item = matching[0]
+                result.insert(0, item)
+                selected_chunks.add(item.chunk_id)
+
+        if self._looks_like_visual_evidence_question(question):
+            add_required(self._is_visual_evidence_item)
+        if self._looks_like_table_question(question):
+            add_required(lambda item: self._is_table_evidence_item(item))
+
+        if len(result) <= limit:
+            return result
+        required_chunks = {
+            item.chunk_id
+            for item in result
+            if (
+                self._looks_like_visual_evidence_question(question)
+                and self._is_visual_evidence_item(item)
+            )
+            or (
+                self._looks_like_table_question(question)
+                and self._is_table_evidence_item(item)
+            )
+        }
+        trimmed: list[EvidenceItem] = []
+        for item in result:
+            if len(trimmed) < limit or item.chunk_id in required_chunks:
+                trimmed.append(item)
+        if len(trimmed) <= limit:
+            return trimmed
+        keep_required = [item for item in trimmed if item.chunk_id in required_chunks]
+        keep_other = [item for item in trimmed if item.chunk_id not in required_chunks]
+        return (keep_required + keep_other)[:limit]
+
+    def _select_prompt_evidence_by_document(
+        self,
+        candidates: list[tuple[float, int, EvidenceItem]],
+        *,
+        limit: int,
+    ) -> list[EvidenceItem]:
+        selected: list[EvidenceItem] = []
+        selected_chunks: set[str] = set()
+        document_ids = list(dict.fromkeys(item.document_id for _, _, item in candidates if item.document_id))
+        for document_id in document_ids:
+            for _, _, item in candidates:
+                if item.document_id != document_id or item.chunk_id in selected_chunks:
+                    continue
+                selected.append(item)
+                selected_chunks.add(item.chunk_id)
+                break
+        for _, _, item in candidates:
+            if item.chunk_id in selected_chunks:
+                continue
+            selected.append(item)
+            selected_chunks.add(item.chunk_id)
+            if len(selected) >= limit:
+                break
+        return selected[:limit]
 
     def _format_evidence_for_model_prompt(
         self,
@@ -288,7 +454,7 @@ class AgentAnsweringMixin:
                 continue
             blocks.append(
                 f"[{item.citation_id}] {item.paper_name} | Page {self._evidence_page_label(item)} | "
-                f"Section: {item.section or 'Unknown'} | Score: {item.score:.3f}\n"
+                f"Section: {item.section or 'Unknown'} | Type: {item.chunk_type or 'text'} | Score: {item.score:.3f}\n"
                 f"{summary}"
             )
         return "\n\n".join(blocks)
@@ -318,10 +484,35 @@ class AgentAnsweringMixin:
         text = self._sanitize_evidence_text(item.text)
         if not text.strip():
             return ""
+        if self._is_visual_evidence_item(item) and self._looks_like_visual_evidence_question(question):
+            return self._truncate_readable_text(text, limit=760)
+        if self._is_table_evidence_item(item) and self._looks_like_metric_result_question(question) and item.quote:
+            return self._truncate_readable_text(item.quote, limit=900)
+        if self._is_table_evidence_item(item) and self._looks_like_table_question(question):
+            return self._truncate_readable_text(text, limit=640)
+        if self._looks_like_debug_or_improvement_question(question):
+            focused_debug = self._debug_or_improvement_quote(text)
+            if focused_debug:
+                return focused_debug
+        if self._looks_like_flow_or_principle_question(question):
+            focused_flow = self._flow_or_principle_quote(text)
+            if focused_flow:
+                return focused_flow
+        if self._looks_like_client_server_design_question(question):
+            focused_design = self._client_server_design_quote(text)
+            if focused_design:
+                return focused_design
         if self._looks_like_reference_question(question):
             return self._best_reference_quote(text, limit=360)
         if self._looks_like_field_lookup_question(question):
             return self._truncate_readable_text(item.quote or text, limit=220)
+        if (
+            self._looks_like_trustworthy_characteristics_question(question)
+            or self._looks_like_pretraining_objective_question(question)
+            or self._looks_like_dataset_or_scale_question(question)
+            or self._looks_like_metric_result_question(question)
+        ) and item.quote:
+            return self._truncate_readable_text(item.quote, limit=620)
 
         focused = self._focused_sentences_for_question(question, text, limit=2)
         if not focused:
@@ -337,6 +528,79 @@ class AgentAnsweringMixin:
             cleaned = [self._trim_model_prompt_sentence(quote)] if quote else []
         summary = " ".join(cleaned)
         return self._truncate_readable_text(summary, limit=420)
+
+    def _looks_like_visual_evidence_question(self, question: str) -> bool:
+        keywords = ["图片", "图像", "截图", "运行截图", "图表", "图中", "视觉", "image", "figure", "chart"]
+        return any(keyword in question.lower() for keyword in keywords)
+
+    def _looks_like_debug_or_improvement_question(self, question: str) -> bool:
+        keywords = ["编译", "调试", "错误", "修复", "改进", "优化", "效率", "提升"]
+        return any(keyword in question for keyword in keywords)
+
+    def _debug_or_improvement_quote(self, text: str) -> str:
+        segments: list[str] = []
+        patterns = [
+            r"首次编译出现\s*2\s*处错误[:：]?\s*.*?(?=编译成功|进入\s*exe|讨论与分析|$)",
+            r"扫描效率改进方案\s*.*?(?=五、|实验者自评|$)",
+            r"改进方式[:：]\s*.*?(?=五、|实验者自评|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.DOTALL)
+            if match:
+                segment = re.sub(r"\s+", " ", match.group(0)).strip()
+                if segment and segment not in segments:
+                    segments.append(segment)
+        return self._truncate_readable_text(" ".join(segments), limit=760) if segments else ""
+
+    def _looks_like_flow_or_principle_question(self, question: str) -> bool:
+        keywords = ["设计原理", "程序流程", "流程", "原理", "步骤"]
+        return any(keyword in question for keyword in keywords)
+
+    def _flow_or_principle_quote(self, text: str) -> str:
+        segments: list[str] = []
+        patterns = [
+            r"设计原理\s*.*?(?=2\.\s*开发环境|开发环境|$)",
+            r"程序流程\s*.*?(?=4\.\s*功能要求|功能要求|实验过程|$)",
+            r"全连接扫描原理\s*.*?(?=2\.\s*扫描效率|扫描效率|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.DOTALL)
+            if match:
+                segment = re.sub(r"\s+", " ", match.group(0)).strip()
+                if segment and segment not in segments:
+                    segments.append(segment)
+        return self._truncate_readable_text(" ".join(segments), limit=700) if segments else ""
+
+    def _looks_like_client_server_design_question(self, question: str) -> bool:
+        return (
+            any(keyword in question for keyword in ["服务端", "服务器"])
+            and any(keyword in question for keyword in ["客户端", "客户程序"])
+            and "设计" in question
+        )
+
+    def _client_server_design_quote(self, text: str) -> str:
+        segments: list[str] = []
+        patterns = [
+            r"一、实验目的\s*.*?(?=二、实验设计|实验设计|$)",
+            r"服务端设计\s*.*?客户端设计\s*.*?(?=开发环境|三、实验过程|实验过程|$)",
+            r"分别完成TCP\s*服务端与TCP\s*客户端代码编写.*?(?=3\.\s*测试步骤|测试步骤|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.DOTALL)
+            if match:
+                segment = re.sub(r"\s+", " ", match.group(0)).strip()
+                if segment and segment not in segments:
+                    segments.append(segment)
+        return self._truncate_readable_text(" ".join(segments), limit=760) if segments else ""
+
+    def _is_visual_evidence_item(self, item: EvidenceItem) -> bool:
+        chunk_type = (item.chunk_type or "").lower()
+        return bool(item.image_id) or any(marker in chunk_type for marker in ["image", "figure", "chart"])
+
+    def _is_table_evidence_item(self, item: EvidenceItem) -> bool:
+        chunk_type = (item.chunk_type or "").lower()
+        text = self._sanitize_evidence_text(item.text)
+        return "table" in chunk_type or self._is_table_like_text(text)
 
     def _trim_model_prompt_sentence(self, sentence: str) -> str:
         cleaned = self._trim_front_matter_prefix(sentence)

@@ -166,6 +166,9 @@ class ChromaPaperStore:
         return sorted(rows, key=lambda row: str(row["id"]))
 
     def _expand_evidence_context(self, item: EvidenceItem) -> EvidenceItem:
+        if item.image_id or "image" in (item.chunk_type or ""):
+            return item
+
         rows = self.get_document_chunks(item.document_id, limit=1000)
         if not rows:
             return item

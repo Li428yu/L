@@ -4,10 +4,12 @@ import hashlib
 import math
 import re
 import time
+import base64
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from backend.app.config import Settings
@@ -67,6 +69,94 @@ class ModelClients:
             raise RuntimeError(
                 "对话模型流式响应失败或响应太慢。"
             ) from exc
+
+    def vision_text(
+        self,
+        *,
+        image_path: Path,
+        prompt: str,
+        model: str | None = None,
+    ) -> str:
+        vision_api_type = self.settings.vision_api_type
+        if vision_api_type in {"ark_responses", "responses", "openai_responses"}:
+            return self._vision_text_with_responses_api(
+                image_path=image_path,
+                prompt=prompt,
+                model=model or self.settings.vision_model,
+            )
+        try:
+            data_url = self._image_data_url(image_path)
+            chat_client = self._vision_chat(model or self.settings.vision_model)
+            response = chat_client.invoke(
+                [
+                    SystemMessage(content="你是严谨的论文图表视觉理解助手，只描述图片中能直接看见的信息。"),
+                    HumanMessage(
+                        content=[
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ]
+                    ),
+                ]
+            )
+        except Exception as exc:
+            raise RuntimeError("视觉模型暂时不可用或不支持图片输入。") from exc
+        return self._message_content_to_text(getattr(response, "content", "")).strip()
+
+    def _vision_chat(self, model: str) -> ChatOpenAI:
+        if self.settings.vision_api_key or self.settings.vision_api_base_url:
+            if not self.settings.vision_api_key:
+                raise RuntimeError("缺少 VISION_API_KEY 或 ARK_API_KEY，无法调用独立视觉模型。")
+            return ChatOpenAI(
+                api_key=self.settings.vision_api_key,
+                base_url=self.settings.vision_api_base_url,
+                model=model,
+                temperature=0,
+                timeout=self.settings.model_timeout_seconds,
+                max_retries=self.settings.model_max_retries,
+            )
+        return self.chat(model)
+
+    def _vision_text_with_responses_api(
+        self,
+        *,
+        image_path: Path,
+        prompt: str,
+        model: str,
+    ) -> str:
+        if not self.settings.vision_api_key:
+            raise RuntimeError("缺少 VISION_API_KEY 或 ARK_API_KEY，无法调用视觉 Responses API。")
+        if not self.settings.vision_api_base_url:
+            raise RuntimeError("缺少 VISION_API_BASE_URL，无法调用视觉 Responses API。")
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(
+                base_url=self.settings.vision_api_base_url,
+                api_key=self.settings.vision_api_key,
+                timeout=self.settings.model_timeout_seconds,
+                max_retries=self.settings.model_max_retries,
+            )
+            response = client.responses.create(
+                model=model,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": self._image_data_url(image_path),
+                            },
+                            {
+                                "type": "input_text",
+                                "text": prompt,
+                            },
+                        ],
+                    }
+                ],
+            )
+        except Exception as exc:
+            raise RuntimeError("视觉 Responses API 调用失败。") from exc
+        return self._responses_output_text(response)
 
     def embed_documents(self, texts: list[str], model: str | None = None) -> list[list[float]]:
         return self.embed_documents_with_info(texts, model=model).vectors
@@ -222,6 +312,36 @@ class ModelClients:
                     parts.append(item["text"])
             return "".join(parts)
         return str(content) if content else ""
+
+    def _image_data_url(self, image_path: Path) -> str:
+        data = image_path.read_bytes()
+        suffix = image_path.suffix.lower()
+        media_type = "image/png"
+        if suffix in {".jpg", ".jpeg"}:
+            media_type = "image/jpeg"
+        elif suffix == ".webp":
+            media_type = "image/webp"
+        encoded = base64.b64encode(data).decode("ascii")
+        return f"data:{media_type};base64,{encoded}"
+
+    def _responses_output_text(self, response) -> str:
+        output_text = getattr(response, "output_text", None)
+        if output_text:
+            return str(output_text).strip()
+
+        parts: list[str] = []
+        output = getattr(response, "output", None) or []
+        for item in output:
+            content = getattr(item, "content", None)
+            if content is None and isinstance(item, dict):
+                content = item.get("content")
+            for block in content or []:
+                text = getattr(block, "text", None)
+                if text is None and isinstance(block, dict):
+                    text = block.get("text")
+                if text:
+                    parts.append(str(text))
+        return "".join(parts).strip()
 
     def _local_embedding(self, text: str, dimensions: int = 384) -> list[float]:
         vector = [0.0] * dimensions

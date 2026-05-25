@@ -149,6 +149,10 @@ class RagTrace(BaseModel):
     task_parse_reason: str = ""
     evidence_judgments: list[dict[str, Any]] = Field(default_factory=list)
     verification: dict[str, Any] = Field(default_factory=dict)
+    multi_document_cards: list[dict[str, Any]] = Field(default_factory=list)
+    document_relation_map: list[dict[str, Any]] = Field(default_factory=list)
+    multi_document_coverage: dict[str, Any] = Field(default_factory=dict)
+    visual_ocr_warnings: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AskRequest(BaseModel):
@@ -246,24 +250,99 @@ class EvaluationCase(BaseModel):
     id: str
     question: str
     expected_keywords: list[str] = Field(default_factory=list)
+    expected_answer: str = ""
     expected_document: str | None = None
     expected_page: int | None = None
+    expected_documents: list[str] = Field(default_factory=list)
+    expected_pages: list[int] = Field(default_factory=list)
+    expected_evidence_keywords: list[str] = Field(default_factory=list)
+    expected_modalities: list[str] = Field(default_factory=list)
+    relation_keywords: list[str] = Field(default_factory=list)
+    required_document_count: int | None = None
+    expected_claims: list[str] = Field(default_factory=list)
+    forbidden_claims: list[str] = Field(default_factory=list)
+    expected_relation: str = ""
+    expected_refusal: bool | None = None
+    judge_rubric: str = ""
+
+
+class EvaluationRunRequest(BaseModel):
+    document_ids: list[str] = Field(default_factory=list)
+    suite_name: str | None = None
+    suite_path: str | None = None
+    case_ids: list[str] = Field(default_factory=list)
+    limit: int | None = None
+    enable_judge: bool | None = None
+    model_preset: str | None = None
+    chat_model: str | None = None
+    embedding_model: str | None = None
+    top_k: int | None = None
 
 
 class EvaluationResult(BaseModel):
     case_id: str
     question: str
     answer: str
+    error: str | None = None
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    trace_summary: dict[str, Any] = Field(default_factory=dict)
     retrieval_hit: bool
     citation_hit: bool
     keyword_hit_rate: float
+    context_precision: float = 0.0
+    context_recall: float = 0.0
+    document_coverage: float = 1.0
+    image_evidence_hit: bool = True
+    visual_evidence_hit: bool = True
+    table_evidence_hit: bool = True
+    ocr_evidence_hit: bool = True
+    citation_accuracy: float = 1.0
+    answer_relevance: float = 0.0
+    faithfulness_proxy: float = 0.0
+    claim_hit_rate: float = 1.0
+    forbidden_claim_rate: float = 0.0
+    refusal_correctness: float = 1.0
+    relation_hit: float = 1.0
+    visual_warning_count: int = 0
+    judge_used: bool = False
+    judge_score: float = 0.0
+    judge_scores: dict[str, float] = Field(default_factory=dict)
+    judge_reason: str = ""
+    score: float = 0.0
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
     latency_ms: int
 
 
 class EvaluationRun(BaseModel):
+    run_id: str = ""
     suite_name: str
+    created_at: str = ""
+    document_ids: list[str] = Field(default_factory=list)
+    case_count: int = 0
+    judge_enabled: bool = False
+    score_version: str = "rag-eval-v1"
     results: list[EvaluationResult]
     retrieval_hit_rate: float
     citation_hit_rate: float
     avg_keyword_hit_rate: float
+    avg_context_precision: float = 0.0
+    avg_context_recall: float = 0.0
+    avg_document_coverage: float = 1.0
+    avg_image_evidence_hit_rate: float = 1.0
+    avg_visual_evidence_hit_rate: float = 1.0
+    avg_table_evidence_hit_rate: float = 1.0
+    avg_ocr_evidence_hit_rate: float = 1.0
+    avg_citation_accuracy: float = 1.0
+    avg_answer_relevance: float = 0.0
+    avg_faithfulness_proxy: float = 0.0
+    avg_claim_hit_rate: float = 1.0
+    avg_forbidden_claim_rate: float = 0.0
+    avg_refusal_correctness: float = 1.0
+    avg_relation_hit: float = 1.0
+    avg_visual_warning_count: float = 0.0
+    avg_judge_score: float = 0.0
+    judge_coverage: float = 0.0
+    segment_metrics: dict[str, dict[str, float]] = Field(default_factory=dict)
+    experiment_metadata: dict[str, Any] = Field(default_factory=dict)
+    avg_score: float = 0.0
     avg_latency_ms: int

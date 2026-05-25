@@ -355,7 +355,25 @@ class AgentTextUtilityMixin:
         return sentences
 
     def _looks_like_table_question(self, question: str) -> bool:
-        keywords = ["表格", "表", "公式", "计算", "数值", "数据是多少", "参数", "指标"]
+        presentation_only = any(phrase in question for phrase in ["适合表格", "可以用表格", "用表格", "表格呈现"])
+        evidence_keywords = [
+            "评分表",
+            "实验评分",
+            "分数构成",
+            "分数",
+            "总分",
+            "表格中",
+            "表中",
+            "结构化数据",
+            "数据是多少",
+            "指标",
+            "数值",
+            "公式",
+            "计算",
+        ]
+        if presentation_only and not any(keyword in question for keyword in evidence_keywords):
+            return False
+        keywords = evidence_keywords
         return any(keyword in question for keyword in keywords)
 
     def _reliability_relevance_score(self, text: str) -> int:

@@ -11,7 +11,12 @@ from backend.app.document_processing import (
     safe_upload_name,
     split_pages_into_chunks,
 )
-from backend.app.image_processing import extract_pdf_images, image_records_to_chunks
+from backend.app.image_processing import (
+    enrich_images_with_vision,
+    extract_docx_images,
+    extract_pdf_images,
+    image_records_to_chunks,
+)
 from backend.app.llm_clients import ModelClients
 from backend.app.models import ChunkStrategy, DocumentInfo
 from backend.app.storage import MetadataStore
@@ -78,7 +83,8 @@ class DocumentIndexer:
             pages = extract_document_text(source_path)
             text_pages = [page for page in pages if page.text.strip()]
             image_chunks = []
-            if source_path.suffix.lower() == ".pdf":
+            images = []
+            if source_path.suffix.lower() in {".pdf", ".docx"}:
                 current_stage = "images"
                 if self._stop_if_document_deleted(task_id=task_id, document_id=document.id):
                     return
@@ -87,13 +93,33 @@ class DocumentIndexer:
                     stage="images",
                     status="running",
                     progress=0.24,
-                    message="Extracting PDF images and image text.",
+                    message="正在抽取文档图片和图片文字。",
                 )
-                images = extract_pdf_images(
-                    pdf_path=source_path,
-                    output_dir=self.settings.images_dir / document.id,
-                    document_id=document.id,
-                )
+                if source_path.suffix.lower() == ".pdf":
+                    images = extract_pdf_images(
+                        pdf_path=source_path,
+                        output_dir=self.settings.images_dir / document.id,
+                        document_id=document.id,
+                    )
+                else:
+                    images = extract_docx_images(
+                        docx_path=source_path,
+                        output_dir=self.settings.images_dir / document.id,
+                        document_id=document.id,
+                    )
+                if images and self.settings.enable_vision_analysis:
+                    self.store.update_task(
+                        task_id,
+                        stage="vision",
+                        status="running",
+                        progress=0.28,
+                        message="正在用视觉模型理解论文图片。",
+                    )
+                    images = enrich_images_with_vision(
+                        images=images,
+                        analyze_image=self._analyze_image_with_vision,
+                        max_images=self.settings.max_vision_images,
+                    )
                 self.store.replace_document_images(
                     document_id=document.id,
                     images=[image.to_storage_dict() for image in images],
@@ -106,7 +132,7 @@ class DocumentIndexer:
                     file_hash=document.file_hash,
                 )
             if not text_pages and not image_chunks:
-                raise ValueError("没有读取到可用文字。扫描版 PDF 需要先做 OCR，空白 DOCX 也无法索引。")
+                raise ValueError("没有读取到可用文字或图片证据。扫描版 PDF 需要 OCR，空白 DOCX 也无法索引。")
 
             current_stage = "chunk"
             if self._stop_if_document_deleted(task_id=task_id, document_id=document.id):
@@ -254,6 +280,13 @@ class DocumentIndexer:
             vectors=vectors,
             provider=provider,
             used_fallback=used_fallback,
+        )
+
+    def _analyze_image_with_vision(self, image_path: Path, prompt: str) -> str:
+        return self.model_clients.vision_text(
+            image_path=image_path,
+            prompt=prompt,
+            model=self.settings.vision_model,
         )
 
     def _friendly_error(self, exc: Exception, stage: str) -> str:

@@ -453,25 +453,29 @@ details small {
 
 .answer-markdown {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  max-width: 76ch;
 }
 
 .answer-markdown p,
 .answer-markdown ul,
 .answer-markdown ol,
 .answer-markdown h3,
-.answer-markdown h4 {
+.answer-markdown h4,
+.answer-markdown table {
   margin: 0;
 }
 
 .answer-markdown h3 {
-  font-size: 20px;
+  margin-top: 4px;
+  font-size: 18px;
   line-height: 1.35;
   color: var(--ink);
 }
 
 .answer-markdown h4 {
-  font-size: 17px;
+  margin-top: 2px;
+  font-size: 16px;
   line-height: 1.4;
   color: var(--ink);
 }
@@ -492,6 +496,53 @@ details small {
   color: var(--ink);
 }
 
+.answer-markdown a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.markdown-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffdf8;
+}
+
+.answer-markdown table {
+  width: 100%;
+  min-width: min(720px, 100%);
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.answer-markdown th,
+.answer-markdown td {
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 9px 11px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.answer-markdown th:last-child,
+.answer-markdown td:last-child {
+  border-right: 0;
+}
+
+.answer-markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.answer-markdown th {
+  background: var(--panel-soft);
+  color: var(--ink);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .citation-row {
   display: flex;
   flex-wrap: wrap;
@@ -503,16 +554,23 @@ details small {
 .citation-row button,
 .inline-citation {
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 1px 7px;
   background: var(--accent-soft);
   color: var(--accent);
+  font-size: 13px;
   font-weight: 800;
   vertical-align: baseline;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  margin: 0 3px;
-  line-height: 1.45;
+  margin: 0 2px;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.inline-citation.muted {
+  background: #f4f5f2;
+  color: var(--muted);
 }
 
 .citation-more {
