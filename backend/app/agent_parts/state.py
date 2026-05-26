@@ -26,13 +26,16 @@ class PaperAgentState(TypedDict, total=False):
     answer_strategy: str
     fallback_used: bool
     evidence_quality: str
+    evidence_coverage: dict[str, Any]
     diagnosis: str
     retrieval_attempts: int
     retrieval_pipeline: str
     ranking_method: str
+    embedding_trace: dict[str, Any]
     soft_intent: dict[str, Any]
     compound_tasks: list[str]
     task_parse_reason: str
+    evidence_quality_trace: list[dict[str, Any]]
     evidence_judgments: list[dict[str, Any]]
     verification: dict[str, Any]
     multi_document_cards: list[dict[str, Any]]
@@ -84,3 +87,4 @@ class AnswerPlan:
     local_answer: str = ""
     final_prompt_evidence: list[str] = field(default_factory=list)
     prompt_evidence: list[EvidenceItem] = field(default_factory=list)
+    evidence_coverage: dict[str, Any] = field(default_factory=dict)

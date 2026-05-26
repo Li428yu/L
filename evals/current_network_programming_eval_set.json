@@ -10,7 +10,9 @@
       "expected_pages": [1],
       "expected_keywords": ["TCP", "C/S", "Winsock", "服务端", "客户端", "回显"],
       "expected_evidence_keywords": ["实验目的", "服务端设计", "客户端设计", "Winsock", "回显"],
-      "judge_rubric": "必须明确区分实验目的、服务端设计、客户端设计，且引用实验一的证据。"
+      "judge_rubric": "必须明确区分实验目的、服务端设计、客户端设计，且引用实验一的证据。",
+      "expected_claims": ["TCP", "C/S", "Winsock", "服务端", "客户端", "回显"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_handshake_and_api",
@@ -20,7 +22,9 @@
       "expected_pages": [1, 2],
       "expected_keywords": ["三次握手", "SYN", "SYN+ACK", "ACK", "WSAStartup", "socket", "bind", "listen", "accept", "connect", "send", "recv"],
       "expected_evidence_keywords": ["connect", "三次握手", "服务端核心 API", "客户端核心 API"],
-      "judge_rubric": "不得只泛泛解释 TCP；要以实验一原文为准列出 API 和握手过程。"
+      "judge_rubric": "不得只泛泛解释 TCP；要以实验一原文为准列出 API 和握手过程。",
+      "expected_claims": ["三次握手", "SYN", "SYN+ACK", "ACK", "WSAStartup", "socket", "bind", "listen", "accept", "connect", "send", "recv"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_visual_run_result",
@@ -31,7 +35,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["截图", "8888", "127.0.0.1", "1234", "回显", "服务端", "客户端"],
       "expected_evidence_keywords": ["Image evidence", "Summary", "1234", "回显", "8888"],
-      "judge_rubric": "必须使用图片/视觉摘要证据；如果只用正文证据，visual_grounding 应降低。"
+      "judge_rubric": "必须使用图片/视觉摘要证据；如果只用正文证据，visual_grounding 应降低。",
+      "expected_claims": ["截图", "8888", "127.0.0.1", "1234", "回显", "服务端", "客户端"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_principle_and_flow",
@@ -41,7 +47,9 @@
       "expected_pages": [1],
       "expected_keywords": ["全连接扫描", "三次握手", "connect", "端口开放", "命令行", "Winsock2"],
       "expected_evidence_keywords": ["设计原理", "程序流程", "端口开放", "Winsock2"],
-      "judge_rubric": "要能区分原理和流程，且引用实验二证据。"
+      "judge_rubric": "要能区分原理和流程，且引用实验二证据。",
+      "expected_claims": ["全连接扫描", "三次握手", "connect", "端口开放", "命令行", "Winsock2"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_debug_and_improvement",
@@ -51,7 +59,9 @@
       "expected_pages": [1, 2],
       "expected_keywords": ["WSAStartup", "substr", "多线程", "超时", "异步套接字", "扫描效率"],
       "expected_evidence_keywords": ["首次编译", "未初始化", "substr", "多线程", "异步套接字"],
-      "judge_rubric": "需要同时覆盖调试问题和效率改进，遗漏任一部分应降分。"
+      "judge_rubric": "需要同时覆盖调试问题和效率改进，遗漏任一部分应降分。",
+      "expected_claims": ["WSAStartup", "substr", "多线程", "超时", "异步套接字", "扫描效率"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_visual_run_result",
@@ -62,7 +72,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["图片", "127.0.0.1", "8888", "开放", "退出代码", "Visual Studio"],
       "expected_evidence_keywords": ["Image evidence", "Summary", "8888", "开放", "退出代码"],
-      "judge_rubric": "必须使用图片/视觉摘要证据，并避免凭正文推断截图内容。"
+      "judge_rubric": "必须使用图片/视觉摘要证据，并避免凭正文推断截图内容。",
+      "expected_claims": ["图片", "127.0.0.1", "8888", "开放", "退出代码", "Visual Studio"],
+      "expected_refusal": false
     },
     {
       "id": "multi_doc_compare",
@@ -72,7 +84,9 @@
       "required_document_count": 2,
       "expected_keywords": ["实验一", "实验二", "TCP通信", "端口扫描", "回显", "开放端口", "三次握手"],
       "relation_keywords": ["对比", "不同", "分别"],
-      "judge_rubric": "必须同时纳入两份文档并保持关系清楚；表格可加分但不是强制。"
+      "judge_rubric": "必须同时纳入两份文档并保持关系清楚；表格可加分但不是强制。",
+      "expected_claims": ["实验一", "实验二", "TCP通信", "端口扫描", "回显", "开放端口", "三次握手"],
+      "expected_refusal": false
     },
     {
       "id": "multi_doc_relation",
@@ -82,7 +96,9 @@
       "required_document_count": 2,
       "expected_keywords": ["互补", "支持", "不冲突", "TCP", "三次握手", "Winsock"],
       "relation_keywords": ["互补", "支持", "冲突"],
-      "judge_rubric": "不能只给关系标签；必须说明为什么，并分别引用两份文档证据。"
+      "judge_rubric": "不能只给关系标签；必须说明为什么，并分别引用两份文档证据。",
+      "expected_claims": ["互补", "支持", "不冲突", "TCP", "三次握手", "Winsock"],
+      "expected_refusal": false
     },
     {
       "id": "score_table_components",
@@ -93,7 +109,9 @@
       "expected_modalities": ["table"],
       "expected_keywords": ["实验过程", "40分", "实验结果", "20分", "实验报告书写规范", "实验思考", "实验总分"],
       "expected_evidence_keywords": ["实验分数构成", "实验过程", "实验结果", "实验报告书写规范", "实验思考"],
-      "judge_rubric": "应命中表格证据；如果把评分项说错或漏掉主要项，应明显降分。"
+      "judge_rubric": "应命中表格证据；如果把评分项说错或漏掉主要项，应明显降分。",
+      "expected_claims": ["实验过程", "40分", "实验结果", "20分", "实验报告书写规范", "实验思考", "实验总分"],
+      "expected_refusal": false
     },
     {
       "id": "insufficient_clinical_claim",
@@ -102,7 +120,9 @@
       "expected_documents": ["网络程序设计实验一.docx", "网络程序设计实验二.docx"],
       "required_document_count": 2,
       "expected_keywords": ["证据不足", "无法证明", "临床诊断", "准确率"],
-      "judge_rubric": "这是证据不足拒答用例；如果编造临床结论或给出肯定回答，应判低分。"
+      "judge_rubric": "这是证据不足拒答用例；如果编造临床结论或给出肯定回答，应判低分。",
+      "expected_claims": ["证据不足", "无法证明", "临床诊断", "准确率"],
+      "expected_refusal": true
     },
     {
       "id": "tcp_environment_and_dependency",
@@ -112,7 +132,9 @@
       "expected_pages": [1],
       "expected_keywords": ["Visual Studio 2019", "ws2_32.lib", "Winsock", "TCP"],
       "expected_evidence_keywords": ["开发环境", "Visual Studio 2019", "ws2_32.lib"],
-      "judge_rubric": "必须引用实验一环境配置证据；不能混用实验二的 Visual Studio 2022。"
+      "judge_rubric": "必须引用实验一环境配置证据；不能混用实验二的 Visual Studio 2022。",
+      "expected_claims": ["Visual Studio 2019", "ws2_32.lib", "Winsock", "TCP"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_test_steps",
@@ -122,7 +144,9 @@
       "expected_pages": [1],
       "expected_keywords": ["启动服务端", "8888", "客户端", "127.0.0.1", "测试数据", "输出结果"],
       "expected_evidence_keywords": ["测试步骤", "监听端口8888", "client.exe 127.0.0.1 8888"],
-      "judge_rubric": "要按测试流程顺序回答，并引用实验一证据。"
+      "judge_rubric": "要按测试流程顺序回答，并引用实验一证据。",
+      "expected_claims": ["启动服务端", "8888", "客户端", "127.0.0.1", "测试数据", "输出结果"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_text_output_result",
@@ -132,7 +156,9 @@
       "expected_pages": [1],
       "expected_keywords": ["服务端已启动", "客户端已连接", "当前连接数", "接收数据", "回显数据完成", "成功连接服务端", "接收回显"],
       "expected_evidence_keywords": ["服务端输出", "客户端输出", "回显数据完成"],
-      "judge_rubric": "必须区分服务端输出和客户端输出，不能只泛泛说运行成功。"
+      "judge_rubric": "必须区分服务端输出和客户端输出，不能只泛泛说运行成功。",
+      "expected_claims": ["服务端已启动", "客户端已连接", "当前连接数", "接收数据", "回显数据完成", "成功连接服务端", "接收回显"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_blocking_accept_connect",
@@ -142,7 +168,9 @@
       "expected_pages": [1, 2],
       "expected_keywords": ["accept", "connect", "阻塞", "服务端", "客户端", "返回错误"],
       "expected_evidence_keywords": ["VC 验证方法", "不启动客户端", "不启动服务端", "阻塞"],
-      "judge_rubric": "必须同时覆盖 accept 和 connect 两个函数的验证方式。"
+      "judge_rubric": "必须同时覆盖 accept 和 connect 两个函数的验证方式。",
+      "expected_claims": ["accept", "connect", "阻塞", "服务端", "客户端", "返回错误"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_server_api_roles",
@@ -152,7 +180,9 @@
       "expected_pages": [1, 2],
       "expected_keywords": ["WSAStartup", "socket", "bind", "listen", "accept", "recv", "send", "closesocket", "WSACleanup"],
       "expected_evidence_keywords": ["服务端核心 API", "初始化 Winsock", "开启监听", "接收客户端数据"],
-      "judge_rubric": "必须按服务端 API 解释，不要混入客户端专属 connect。"
+      "judge_rubric": "必须按服务端 API 解释，不要混入客户端专属 connect。",
+      "expected_claims": ["WSAStartup", "socket", "bind", "listen", "accept", "recv", "send", "closesocket", "WSACleanup"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_client_api_roles",
@@ -162,7 +192,9 @@
       "expected_pages": [1, 2],
       "expected_keywords": ["WSAStartup", "socket", "connect", "send", "recv", "closesocket", "WSACleanup"],
       "expected_evidence_keywords": ["客户端核心 API", "向服务端发起连接请求", "接收服务端回显数据"],
-      "judge_rubric": "必须按客户端 API 解释，不要把 bind/listen/accept 当作客户端核心流程。"
+      "judge_rubric": "必须按客户端 API 解释，不要把 bind/listen/accept 当作客户端核心流程。",
+      "expected_claims": ["WSAStartup", "socket", "connect", "send", "recv", "closesocket", "WSACleanup"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_self_assessment",
@@ -172,7 +204,9 @@
       "expected_pages": [2],
       "expected_keywords": ["实验设计", "实验过程", "知识点理解", "TCP", "流式套接字"],
       "expected_evidence_keywords": ["实验者自评", "实验设计", "实验过程", "知识点理解"],
-      "judge_rubric": "要引用自评段落，不要把评分表误当自评。"
+      "judge_rubric": "要引用自评段落，不要把评分表误当自评。",
+      "expected_claims": ["实验设计", "实验过程", "知识点理解", "TCP", "流式套接字"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_improvement_direction",
@@ -182,7 +216,9 @@
       "expected_pages": [2],
       "expected_keywords": ["单客户端", "多线程", "多客户端并发", "服务端性能"],
       "expected_evidence_keywords": ["改进方向", "仅支持单客户端", "多线程", "并发通信"],
-      "judge_rubric": "必须指出现有限制和对应改进，不能泛泛说优化性能。"
+      "judge_rubric": "必须指出现有限制和对应改进，不能泛泛说优化性能。",
+      "expected_claims": ["单客户端", "多线程", "多客户端并发", "服务端性能"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_goal_and_requirements",
@@ -192,7 +228,9 @@
       "expected_pages": [1],
       "expected_keywords": ["端口扫描", "全连接扫描", "命令行", "开放端口", "1~65535"],
       "expected_evidence_keywords": ["实验目的", "功能要求", "仅输出开放端口"],
-      "judge_rubric": "必须同时覆盖实验目的和功能要求。"
+      "judge_rubric": "必须同时覆盖实验目的和功能要求。",
+      "expected_claims": ["端口扫描", "全连接扫描", "命令行", "开放端口", "1~65535"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_environment",
@@ -202,7 +240,9 @@
       "expected_pages": [1],
       "expected_keywords": ["Visual Studio 2022", "C++", "Windows Socket 2", "Winsock2", "Windows 11"],
       "expected_evidence_keywords": ["开发环境", "开发工具", "开发语言", "网络库", "运行环境"],
-      "judge_rubric": "不能把实验一的 Visual Studio 2019 写到实验二。"
+      "judge_rubric": "不能把实验一的 Visual Studio 2019 写到实验二。",
+      "expected_claims": ["Visual Studio 2022", "C++", "Windows Socket 2", "Winsock2", "Windows 11"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_command_format",
@@ -212,7 +252,9 @@
       "expected_pages": [1],
       "expected_keywords": ["scan", "IP", "起始端口", "结束端口", "命令行"],
       "expected_evidence_keywords": ["命令行格式", "scan IP 起始端口-结束端口"],
-      "judge_rubric": "必须引用功能要求或代码参数校验证据。"
+      "judge_rubric": "必须引用功能要求或代码参数校验证据。",
+      "expected_claims": ["scan", "IP", "起始端口", "结束端口", "命令行"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_compile_errors",
@@ -222,7 +264,9 @@
       "expected_pages": [1],
       "expected_keywords": ["未初始化 Winsock2", "WSAStartup", "端口字符串", "substr"],
       "expected_evidence_keywords": ["首次编译出现 2 处错误", "错误 1", "错误 2"],
-      "judge_rubric": "必须两个错误和两个修复都说清楚。"
+      "judge_rubric": "必须两个错误和两个修复都说清楚。",
+      "expected_claims": ["未初始化 Winsock2", "WSAStartup", "端口字符串", "substr"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_efficiency_improvement_only",
@@ -232,7 +276,9 @@
       "expected_pages": [2],
       "expected_keywords": ["多线程", "超时时间", "过滤", "异步套接字", "非阻塞扫描"],
       "expected_evidence_keywords": ["扫描效率改进方案", "改进方式"],
-      "judge_rubric": "只回答改进方式，不要扩写端口扫描原理。"
+      "judge_rubric": "只回答改进方式，不要扩写端口扫描原理。",
+      "expected_claims": ["多线程", "超时时间", "过滤", "异步套接字", "非阻塞扫描"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_self_assessment",
@@ -242,7 +288,9 @@
       "expected_pages": [2],
       "expected_keywords": ["实验设计", "实验过程", "知识点理解", "端口扫描", "三次握手", "Winsock"],
       "expected_evidence_keywords": ["实验者自评", "程序稳定运行", "结果准确"],
-      "judge_rubric": "必须引用实验二自评，不要混入实验一自评。"
+      "judge_rubric": "必须引用实验二自评，不要混入实验一自评。",
+      "expected_claims": ["实验设计", "实验过程", "知识点理解", "端口扫描", "三次握手", "Winsock"],
+      "expected_refusal": false
     },
     {
       "id": "visual_evidence_compare_outputs",
@@ -253,7 +301,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["实验一", "实验二", "图片", "8888", "1234", "回显", "开放", "退出代码"],
       "expected_evidence_keywords": ["Image evidence", "Summary", "127.0.0.1", "8888"],
-      "judge_rubric": "必须分别引用两份文档的图片/视觉摘要证据，不能用正文替代图片证据。"
+      "judge_rubric": "必须分别引用两份文档的图片/视觉摘要证据，不能用正文替代图片证据。",
+      "expected_claims": ["实验一", "实验二", "图片", "8888", "1234", "回显", "开放", "退出代码"],
+      "expected_refusal": false
     },
     {
       "id": "visual_evidence_not_statistics",
@@ -264,7 +314,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["不是统计图表", "运行演示", "控制台", "回显", "开放端口"],
       "expected_evidence_keywords": ["不属于统计/分析类图表", "不属于图表", "可支持的论文事实"],
-      "judge_rubric": "必须说明图片类型和可支持事实，不能把控制台截图当坐标图趋势图。"
+      "judge_rubric": "必须说明图片类型和可支持事实，不能把控制台截图当坐标图趋势图。",
+      "expected_claims": ["不是统计图表", "运行演示", "控制台", "回显", "开放端口"],
+      "expected_refusal": false
     },
     {
       "id": "multi_doc_shared_foundation",
@@ -274,7 +326,9 @@
       "required_document_count": 2,
       "expected_keywords": ["TCP", "Winsock", "三次握手", "connect", "连接"],
       "relation_keywords": ["共同", "分别"],
-      "judge_rubric": "必须同时引用两份文档，区分共同基础和各自侧重点。"
+      "judge_rubric": "必须同时引用两份文档，区分共同基础和各自侧重点。",
+      "expected_claims": ["TCP", "Winsock", "三次握手", "connect", "连接"],
+      "expected_refusal": false
     },
     {
       "id": "multi_doc_conflict_check",
@@ -284,7 +338,9 @@
       "required_document_count": 2,
       "expected_keywords": ["没有明显冲突", "三次握手", "Winsock", "任务不同", "方向一致"],
       "relation_keywords": ["冲突", "一致", "依据"],
-      "judge_rubric": "这是冲突关系评测，必须基于两份证据判断，不要默认都一致而不解释。"
+      "judge_rubric": "这是冲突关系评测，必须基于两份证据判断，不要默认都一致而不解释。",
+      "expected_claims": ["没有明显冲突", "三次握手", "Winsock", "任务不同", "方向一致"],
+      "expected_refusal": false
     },
     {
       "id": "score_table_consistency",
@@ -295,7 +351,9 @@
       "expected_modalities": ["table"],
       "expected_keywords": ["一致", "实验过程", "40分", "实验结果", "20分", "实验报告书写规范", "实验思考"],
       "expected_evidence_keywords": ["实验分数构成", "实验总分"],
-      "judge_rubric": "必须命中两份文档的表格证据；只引用一份不得满分。"
+      "judge_rubric": "必须命中两份文档的表格证据；只引用一份不得满分。",
+      "expected_claims": ["一致", "实验过程", "40分", "实验结果", "20分", "实验报告书写规范", "实验思考"],
+      "expected_refusal": false
     },
     {
       "id": "insufficient_udp_claim",
@@ -304,7 +362,9 @@
       "expected_documents": ["网络程序设计实验一.docx", "网络程序设计实验二.docx"],
       "required_document_count": 2,
       "expected_keywords": ["无法证明", "没有证据", "UDP", "TCP"],
-      "judge_rubric": "如果把 TCP 误写成 UDP 或编造 UDP 实现，应判低分。"
+      "judge_rubric": "如果把 TCP 误写成 UDP 或编造 UDP 实现，应判低分。",
+      "expected_claims": ["无法证明", "没有证据", "UDP", "TCP"],
+      "expected_refusal": true
     },
     {
       "id": "insufficient_multithread_implemented",
@@ -314,7 +374,9 @@
       "required_document_count": 2,
       "expected_keywords": ["没有证明", "后续改进", "改进方案", "多线程", "并发"],
       "expected_evidence_keywords": ["改进方向", "扫描效率改进方案", "多线程"],
-      "judge_rubric": "必须区分“提出改进”与“已经实现”。"
+      "judge_rubric": "必须区分“提出改进”与“已经实现”。",
+      "expected_claims": ["没有证明", "后续改进", "改进方案", "多线程", "并发"],
+      "expected_refusal": true
     },
     {
       "id": "insufficient_pdf_coverage_current_suite",
@@ -323,7 +385,9 @@
       "expected_documents": ["网络程序设计实验一.docx", "网络程序设计实验二.docx"],
       "required_document_count": 2,
       "expected_keywords": ["不能", "DOCX", "PDF", "上传", "索引", "专项评测"],
-      "judge_rubric": "必须诚实说明当前 ready 文档限制，不能假装已经覆盖 PDF。"
+      "judge_rubric": "必须诚实说明当前 ready 文档限制，不能假装已经覆盖 PDF。",
+      "expected_claims": ["不能", "DOCX", "PDF", "上传", "索引", "专项评测"],
+      "expected_refusal": true
     },
     {
       "id": "tcp_visual_payload_from_image",
@@ -334,7 +398,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["1234", "发送", "回显", "截图", "客户端"],
       "expected_evidence_keywords": ["Image evidence", "Summary", "1234", "回显"],
-      "judge_rubric": "这是视觉证据题，必须以图片识别出的实际控制台内容为准。"
+      "judge_rubric": "这是视觉证据题，必须以图片识别出的实际控制台内容为准。",
+      "expected_claims": ["1234", "发送", "回显", "截图", "客户端"],
+      "expected_refusal": false
     },
     {
       "id": "tcp_visual_server_client_windows",
@@ -345,7 +411,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["左侧", "服务端", "右侧", "客户端", "8888", "127.0.0.1", "回显"],
       "expected_evidence_keywords": ["左侧", "右侧", "服务端", "客户端", "1234"],
-      "judge_rubric": "必须引用图片/视觉摘要，并区分两个窗口的角色。"
+      "judge_rubric": "必须引用图片/视觉摘要，并区分两个窗口的角色。",
+      "expected_claims": ["左侧", "服务端", "右侧", "客户端", "8888", "127.0.0.1", "回显"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_visual_exit_status",
@@ -356,7 +424,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["正常退出", "退出代码", "0", "8888", "开放"],
       "expected_evidence_keywords": ["Image evidence", "Summary", "退出代码为0", "8888端口处于开放状态"],
-      "judge_rubric": "必须使用实验二图片证据，不能只泛泛说程序运行成功。"
+      "judge_rubric": "必须使用实验二图片证据，不能只泛泛说程序运行成功。",
+      "expected_claims": ["正常退出", "退出代码", "0", "8888", "开放"],
+      "expected_refusal": false
     },
     {
       "id": "portscan_visual_target_range",
@@ -367,7 +437,9 @@
       "expected_modalities": ["image", "vision"],
       "expected_keywords": ["127.0.0.1", "8888~8888", "8888", "开放"],
       "expected_evidence_keywords": ["127.0.0.1", "8888~8888", "开放状态"],
-      "judge_rubric": "必须从图片/视觉摘要抽取目标地址与端口范围。"
+      "judge_rubric": "必须从图片/视觉摘要抽取目标地址与端口范围。",
+      "expected_claims": ["127.0.0.1", "8888~8888", "8888", "开放"],
+      "expected_refusal": false
     },
     {
       "id": "multi_doc_learning_progression",
@@ -377,7 +449,9 @@
       "required_document_count": 2,
       "expected_keywords": ["递进", "TCP", "C/S", "回显", "端口扫描", "全连接", "三次握手"],
       "relation_keywords": ["学习路径", "基础", "应用"],
-      "judge_rubric": "必须同时纳入两份报告，说明先后关系和能力递进，而不是简单罗列。"
+      "judge_rubric": "必须同时纳入两份报告，说明先后关系和能力递进，而不是简单罗列。",
+      "expected_claims": ["递进", "TCP", "C/S", "回显", "端口扫描", "全连接", "三次握手"],
+      "expected_refusal": false
     },
     {
       "id": "multi_doc_same_port_different_meaning",
@@ -387,7 +461,9 @@
       "required_document_count": 2,
       "expected_keywords": ["不是同一个任务", "8888", "监听端口", "目标端口", "回显", "扫描", "含义不同"],
       "relation_keywords": ["区别", "含义", "任务"],
-      "judge_rubric": "必须处理同一数字在不同文档中的不同语义，避免把两份证据混成一个事实。"
+      "judge_rubric": "必须处理同一数字在不同文档中的不同语义，避免把两份证据混成一个事实。",
+      "expected_claims": ["不是同一个任务", "8888", "监听端口", "目标端口", "回显", "扫描", "含义不同"],
+      "expected_refusal": false
     },
     {
       "id": "multi_doc_output_granularity",
@@ -397,7 +473,9 @@
       "required_document_count": 2,
       "expected_keywords": ["输出粒度", "连接", "发送", "接收", "回显", "端口范围", "开放端口"],
       "relation_keywords": ["不同", "分别"],
-      "judge_rubric": "必须从运行结果角度比较，而不是只比较实验目的。"
+      "judge_rubric": "必须从运行结果角度比较，而不是只比较实验目的。",
+      "expected_claims": ["输出粒度", "连接", "发送", "接收", "回显", "端口范围", "开放端口"],
+      "expected_refusal": false
     },
     {
       "id": "score_table_total_items",
@@ -408,7 +486,9 @@
       "expected_modalities": ["table"],
       "expected_keywords": ["实验总分", "一致", "实验过程", "实验结果", "实验报告书写规范", "实验思考"],
       "expected_evidence_keywords": ["实验总分", "实验分数构成"],
-      "judge_rubric": "必须命中两份表格证据；不能只根据一份表格推断两份一致。"
+      "judge_rubric": "必须命中两份表格证据；不能只根据一份表格推断两份一致。",
+      "expected_claims": ["实验总分", "一致", "实验过程", "实验结果", "实验报告书写规范", "实验思考"],
+      "expected_refusal": false
     },
     {
       "id": "insufficient_performance_benchmark",
@@ -417,7 +497,9 @@
       "expected_documents": ["网络程序设计实验一.docx", "网络程序设计实验二.docx"],
       "required_document_count": 2,
       "expected_keywords": ["没有给出", "可量化", "平均延迟", "吞吐量", "扫描耗时", "性能基准"],
-      "judge_rubric": "必须拒绝无证据的性能结论，不能把运行成功等同于性能评测。"
+      "judge_rubric": "必须拒绝无证据的性能结论，不能把运行成功等同于性能评测。",
+      "expected_claims": ["没有给出", "可量化", "平均延迟", "吞吐量", "扫描耗时", "性能基准"],
+      "expected_refusal": true
     },
     {
       "id": "insufficient_security_encryption",
@@ -426,7 +508,9 @@
       "expected_documents": ["网络程序设计实验一.docx", "网络程序设计实验二.docx"],
       "required_document_count": 2,
       "expected_keywords": ["不能", "没有证据", "TLS", "身份认证", "安全审计", "TCP"],
-      "judge_rubric": "必须基于证据拒答，避免把普通 TCP 通信误判为安全通信。"
+      "judge_rubric": "必须基于证据拒答，避免把普通 TCP 通信误判为安全通信。",
+      "expected_claims": ["不能", "没有证据", "TLS", "身份认证", "安全审计", "TCP"],
+      "expected_refusal": true
     },
     {
       "id": "insufficient_async_socket_implemented",
@@ -436,7 +520,9 @@
       "expected_pages": [2],
       "expected_keywords": ["没有证据", "异步套接字", "非阻塞扫描", "改进方案", "不是已实现"],
       "expected_evidence_keywords": ["扫描效率改进方案", "异步套接字模型", "非阻塞扫描"],
-      "judge_rubric": "必须区分规划/建议和已实现能力。"
+      "judge_rubric": "必须区分规划/建议和已实现能力。",
+      "expected_claims": ["没有证据", "异步套接字", "非阻塞扫描", "改进方案", "不是已实现"],
+      "expected_refusal": true
     }
   ]
 }

@@ -15,9 +15,11 @@ backend/app/agent.py        LangGraph RAG agent
 backend/app/memory.py       用户画像、长期偏好、短期历史
 backend/app/storage.py      SQLite 元数据存储
 backend/app/evaluation.py   回归评测能力，默认不展示在用户界面
+backend/app/eval_baselines.py
+                            评测基线分层、默认基线和评测文档选择
+backend/app/eval_audit.py   评测集质量审计
 data/                       上传文件、Chroma、SQLite，默认不入库
-evals/                      固定问题评测集
-legacy/                     旧 Streamlit demo，仅用于回看
+evals/                      固定问题评测集与 baselines.json
 ```
 
 ## 每一层负责什么

@@ -8,6 +8,12 @@ from dotenv import load_dotenv
 
 from backend.app.agent import PaperAgentService
 from backend.app.config import settings
+from backend.app.eval_baselines import (
+    baseline_metadata,
+    load_eval_baselines,
+    resolve_eval_document_ids,
+    resolve_eval_suite_path as resolve_baseline_suite_path,
+)
 from backend.app.evaluation import load_eval_suite, run_eval_suite
 from backend.app.llm_clients import ModelClients
 from backend.app.memory import MemoryManager
@@ -20,6 +26,9 @@ def main() -> None:
     load_dotenv()
     settings.ensure_dirs()
     args = parse_args()
+    if args.list_baselines:
+        print_baselines()
+        return
 
     store = MetadataStore(settings.sqlite_path)
     model_clients = ModelClients(settings)
@@ -34,7 +43,7 @@ def main() -> None:
         observer=observer,
     )
 
-    suite_path = resolve_suite_path(args.suite)
+    suite_path, baseline = resolve_suite_path(suite=args.suite, baseline_id=args.baseline)
     cases = load_eval_suite(suite_path)
     if args.case:
         wanted = set(args.case)
@@ -44,26 +53,45 @@ def main() -> None:
     if not cases:
         raise SystemExit("没有可运行的评测用例。")
 
-    document_ids = resolve_document_ids(store, args.documents)
+    document_ids = resolve_document_ids(
+        store=store,
+        cases=cases,
+        value=args.documents,
+        document_policy=baseline.document_policy if baseline else "expected_ready",
+    )
     if not document_ids:
-        raise SystemExit("没有可用于评测的已就绪文档。")
+        baseline_hint = f" 基线 {baseline.id} 需要的 expected_document 当前没有 ready 文档。" if baseline else ""
+        raise SystemExit(f"没有可用于评测的已就绪文档。{baseline_hint}")
 
     run = run_eval_suite(
-        suite_name=suite_path.stem,
+        suite_name=baseline.suite_name if baseline else suite_path.stem,
         cases=cases,
         agent=agent,
         document_ids=document_ids,
         observer=observer,
         enable_judge=not args.no_judge,
+        model_preset=args.model_preset,
+        chat_model=args.chat_model,
+        embedding_model=args.embedding_model,
+        top_k=args.top_k,
+        experiment_metadata=baseline_metadata(baseline),
     )
     result_path = settings.eval_results_dir / f"{run.run_id}.json"
+    metadata = baseline_metadata(baseline)
     print(
         json.dumps(
             {
                 "run_id": run.run_id,
                 "suite_name": run.suite_name,
+                **metadata,
                 "case_count": run.case_count,
                 "document_ids": run.document_ids,
+                "result_status_counts": run.result_status_counts,
+                "failure_category_counts": run.failure_category_counts,
+                "grading_summary": run.grading_summary,
+                "evaluation_trustworthy": run.evaluation_trustworthy,
+                "trust_gate_status": run.trust_gate_status,
+                "trust_gate_failures": run.trust_gate_failures,
                 "avg_score": run.avg_score,
                 "avg_judge_score": run.avg_judge_score,
                 "judge_coverage": run.judge_coverage,
@@ -71,17 +99,27 @@ def main() -> None:
                 "citation_hit_rate": run.citation_hit_rate,
                 "avg_context_precision": run.avg_context_precision,
                 "avg_context_recall": run.avg_context_recall,
+                "gold_chunk_case_count": run.gold_chunk_case_count,
+                "avg_gold_chunk_recall_at_1": run.avg_gold_chunk_recall_at_1,
+                "avg_gold_chunk_recall_at_3": run.avg_gold_chunk_recall_at_3,
+                "avg_gold_chunk_recall_at_5": run.avg_gold_chunk_recall_at_5,
+                "avg_gold_chunk_recall_at_k": run.avg_gold_chunk_recall_at_k,
+                "avg_gold_chunk_candidate_recall_at_k": run.avg_gold_chunk_candidate_recall_at_k,
                 "avg_document_coverage": run.avg_document_coverage,
                 "avg_citation_accuracy": run.avg_citation_accuracy,
                 "avg_image_evidence_hit_rate": run.avg_image_evidence_hit_rate,
                 "avg_visual_evidence_hit_rate": run.avg_visual_evidence_hit_rate,
+                "avg_visual_summary_hit_rate": run.avg_visual_summary_hit_rate,
                 "avg_table_evidence_hit_rate": run.avg_table_evidence_hit_rate,
                 "avg_ocr_evidence_hit_rate": run.avg_ocr_evidence_hit_rate,
+                "avg_ocr_text_hit_rate": run.avg_ocr_text_hit_rate,
                 "avg_claim_hit_rate": run.avg_claim_hit_rate,
                 "avg_forbidden_claim_rate": run.avg_forbidden_claim_rate,
                 "avg_refusal_correctness": run.avg_refusal_correctness,
                 "avg_relation_hit": run.avg_relation_hit,
                 "avg_visual_warning_count": run.avg_visual_warning_count,
+                "embedding_fallback_count": run.embedding_fallback_count,
+                "embedding_fallback_rate": run.embedding_fallback_rate,
                 "segment_metrics": run.segment_metrics,
                 "avg_latency_ms": run.avg_latency_ms,
                 "result_path": str(result_path),
@@ -96,41 +134,84 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行论文阅读助手评测集")
     parser.add_argument(
         "--suite",
-        default="current_network_programming_eval_set",
-        help="evals 目录下的评测集名称或 JSON 路径",
+        default=None,
+        help="evals 目录下的评测集名称或 JSON 路径；未指定时使用默认 active baseline",
+    )
+    parser.add_argument(
+        "--baseline",
+        default=None,
+        help="评测基线 ID，例如 pdf_gold_current；未指定时使用 evals/baselines.json 的 default_baseline",
     )
     parser.add_argument(
         "--documents",
-        default="all-ready",
-        help="all-ready 或逗号分隔的 document_id 列表",
+        default="baseline",
+        help="baseline、all-ready 或逗号分隔的 document_id 列表",
     )
     parser.add_argument("--case", action="append", help="只运行指定 case_id，可重复传入")
     parser.add_argument("--limit", type=int, default=None, help="只运行前 N 条 case")
     parser.add_argument("--no-judge", action="store_true", help="关闭 LLM-as-judge，只跑程序化指标")
+    parser.add_argument("--model-preset", default=None, help="指定阅读模式，例如 balanced/careful/quick")
+    parser.add_argument("--chat-model", default=None, help="覆盖对话模型")
+    parser.add_argument("--embedding-model", default=None, help="覆盖 embedding 模型")
+    parser.add_argument("--top-k", type=int, default=None, help="覆盖检索 top-k")
+    parser.add_argument("--list-baselines", action="store_true", help="列出可用评测基线后退出")
     return parser.parse_args()
 
 
-def resolve_suite_path(value: str) -> Path:
-    candidate = Path(value)
-    if not candidate.suffix:
-        candidate = candidate.with_suffix(".json")
-    if not candidate.is_absolute():
-        candidate = settings.project_root / "evals" / candidate
-    resolved = candidate.resolve()
-    eval_root = (settings.project_root / "evals").resolve()
+def resolve_suite_path(*, suite: str | None, baseline_id: str | None):
     try:
-        allowed = resolved.is_relative_to(eval_root)
-    except AttributeError:
-        allowed = str(resolved).startswith(str(eval_root))
-    if not allowed:
+        return resolve_baseline_suite_path(
+            eval_dir=settings.project_root / "evals",
+            suite_name=suite,
+            baseline_id=baseline_id,
+        )
+    except ValueError:
         raise SystemExit("评测集必须放在 evals 目录下。")
-    return resolved
 
 
-def resolve_document_ids(store: MetadataStore, value: str) -> list[str]:
-    if value.strip().lower() == "all-ready":
+def resolve_document_ids(
+    *,
+    store: MetadataStore,
+    cases,
+    value: str,
+    document_policy: str,
+) -> list[str]:
+    normalized = value.strip().lower()
+    if normalized == "all-ready":
         return [document.id for document in store.list_documents() if document.status == "ready"]
+    if normalized in {"baseline", "expected-ready", "expected_ready"}:
+        return resolve_eval_document_ids(
+            documents=store.list_documents(),
+            cases=cases,
+            document_policy=document_policy,
+        )
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def print_baselines() -> None:
+    manifest = load_eval_baselines(settings.project_root / "evals")
+    print(
+        json.dumps(
+            {
+                "default_baseline": manifest.default_baseline,
+                "baselines": [
+                    {
+                        "id": baseline.id,
+                        "label": baseline.label,
+                        "tier": baseline.tier,
+                        "status": baseline.status,
+                        "suite_name": baseline.suite_name,
+                        "suite_path": baseline.suite_path,
+                        "document_policy": baseline.document_policy,
+                        "pause_reason": baseline.pause_reason,
+                    }
+                    for baseline in manifest.baselines
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

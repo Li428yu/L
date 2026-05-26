@@ -93,10 +93,6 @@ class Settings:
     vision_api_type: str = os.getenv("VISION_API_TYPE", "openai_chat").strip().lower()
     enable_vision_analysis: bool = _bool_env("ENABLE_VISION_ANALYSIS", False)
     max_vision_images: int = int(os.getenv("MAX_VISION_IMAGES", "40"))
-    langfuse_enabled: bool = _bool_env("LANGFUSE_ENABLED", False)
-    langfuse_public_key: str | None = os.getenv("LANGFUSE_PUBLIC_KEY")
-    langfuse_secret_key: str | None = os.getenv("LANGFUSE_SECRET_KEY")
-    langfuse_host: str | None = os.getenv("LANGFUSE_HOST")
     enable_llm_judge: bool = _bool_env("ENABLE_LLM_JUDGE", True)
     judge_model: str = os.getenv("JUDGE_MODEL", os.getenv("LLM_MODEL", "gpt-4.1-mini"))
 
@@ -138,7 +134,7 @@ class Settings:
     def embedding_model_options(self) -> list[str]:
         return _csv_env(
             "EMBEDDING_MODEL_OPTIONS",
-            [self.default_embedding_model, "text-embedding-3-large"],
+            [self.default_embedding_model, "text-embedding-3-large", "local-hash-embedding-v1"],
         )
 
     @property

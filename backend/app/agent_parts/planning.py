@@ -83,11 +83,8 @@ class AgentPlanningMixin:
             return fallback
 
         system_prompt = (
-            "你是文档问答系统里的“意图理解助手”。你的任务不是回答用户，"
-            "而是把用户的口语问题理解成可修正的阅读意图，用于后续检索证据。"
-            "不要把本地候选当成最终结论；如果用户说“这文章写了啥/讲了什么”，"
-            "通常是在问主要内容，而不是作者、单位、日期等首页信息。"
-            "只返回 JSON，不要输出解释文字。"
+            "你只做文档问答意图理解，不回答问题。根据用户问题和本地候选，返回可解析 JSON。"
+            "“这文章写了啥/讲了什么”通常是主要内容，不是作者、单位、日期。"
         )
         user_prompt = f"""
 用户问题：{question}
@@ -95,7 +92,7 @@ class AgentPlanningMixin:
 本地候选意图：{local_intent}
 本地候选检索：{local_strategy}
 
-请返回 JSON，字段如下：
+返回 JSON：
 {{
   "intent": "reference_question/field_lookup_question/compare_question/document_wide_question/meta_question/specific_question",
   "operation": "extract/summarize/analyze/compare/judge/answer",
@@ -108,10 +105,7 @@ class AgentPlanningMixin:
   "reason": "一句话说明为什么这样理解"
 }}
 
-要求：
-- JSON 必须能被解析。
-- focus、preferred_roles、exclude_roles 都用短词。
-- 不确定时保守写成 answer + specific_point，并在 reason 说明。
+只输出 JSON。数组用短词；不确定时用 answer + specific_point。
 """.strip()
 
         try:

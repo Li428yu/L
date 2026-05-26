@@ -16,6 +16,8 @@ from backend.app.image_processing import (
     extract_docx_images,
     extract_pdf_images,
     image_records_to_chunks,
+    ocr_status_counts,
+    vision_status_counts,
 )
 from backend.app.llm_clients import ModelClients
 from backend.app.models import ChunkStrategy, DocumentInfo
@@ -84,6 +86,8 @@ class DocumentIndexer:
             text_pages = [page for page in pages if page.text.strip()]
             image_chunks = []
             images = []
+            ocr_counts: dict[str, int] = {}
+            vision_counts: dict[str, int] = {}
             if source_path.suffix.lower() in {".pdf", ".docx"}:
                 current_stage = "images"
                 if self._stop_if_document_deleted(task_id=task_id, document_id=document.id):
@@ -107,6 +111,15 @@ class DocumentIndexer:
                         output_dir=self.settings.images_dir / document.id,
                         document_id=document.id,
                     )
+                ocr_counts = ocr_status_counts(images)
+                if images:
+                    self.store.update_task(
+                        task_id,
+                        stage="images",
+                        status="running",
+                        progress=0.26,
+                        message=self._ocr_status_message(ocr_counts),
+                    )
                 if images and self.settings.enable_vision_analysis:
                     self.store.update_task(
                         task_id,
@@ -119,6 +132,14 @@ class DocumentIndexer:
                         images=images,
                         analyze_image=self._analyze_image_with_vision,
                         max_images=self.settings.max_vision_images,
+                    )
+                    vision_counts = vision_status_counts(images)
+                    self.store.update_task(
+                        task_id,
+                        stage="vision",
+                        status="running",
+                        progress=0.32,
+                        message=self._vision_status_message(vision_counts),
                     )
                 self.store.replace_document_images(
                     document_id=document.id,
@@ -205,10 +226,10 @@ class DocumentIndexer:
                 stage="completed",
                 status="completed",
                 progress=1,
-                message=(
-                    "文档已准备好，可以开始提问。"
-                    if not embedding_result.used_fallback
-                    else "文档已准备好。模型服务暂时不可用，本次先使用本地备用检索。"
+                message=self._completed_message(
+                    embedding_used_fallback=embedding_result.used_fallback,
+                    ocr_counts=ocr_counts,
+                    vision_counts=vision_counts,
                 ),
             )
         except Exception as exc:
@@ -288,6 +309,43 @@ class DocumentIndexer:
             prompt=prompt,
             model=self.settings.vision_model,
         )
+
+    def _vision_status_message(self, counts: dict[str, int]) -> str:
+        total = sum(counts.values())
+        ready = counts.get("vision_ready", 0)
+        failed = counts.get("vision_failed", 0)
+        skipped = counts.get("vision_skipped", 0)
+        return (
+            f"视觉分析完成：共 {total} 张图片，成功 {ready} 张，"
+            f"失败 {failed} 张，跳过 {skipped} 张。"
+        )
+
+    def _ocr_status_message(self, counts: dict[str, int]) -> str:
+        total = sum(counts.values())
+        ready = counts.get("ocr_ready", 0)
+        empty = counts.get("ocr_empty", 0)
+        failed = counts.get("ocr_failed", 0)
+        skipped = counts.get("ocr_skipped", 0)
+        return (
+            f"OCR 完成：共 {total} 张图片，识别成功 {ready} 张，空结果 {empty} 张，"
+            f"失败 {failed} 张，跳过 {skipped} 张。"
+        )
+
+    def _completed_message(
+        self,
+        *,
+        embedding_used_fallback: bool,
+        ocr_counts: dict[str, int],
+        vision_counts: dict[str, int],
+    ) -> str:
+        parts = ["文档已准备好，可以开始提问。"]
+        if ocr_counts:
+            parts.append(self._ocr_status_message(ocr_counts))
+        if vision_counts:
+            parts.append(self._vision_status_message(vision_counts))
+        if embedding_used_fallback:
+            parts.append("模型服务暂时不可用，本次先使用本地备用检索。")
+        return " ".join(parts)
 
     def _friendly_error(self, exc: Exception, stage: str) -> str:
         raw = str(exc).lower()

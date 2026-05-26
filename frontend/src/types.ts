@@ -56,7 +56,10 @@ export interface RelatedImageInfo {
   kind: string;
   caption_text?: string;
   ocr_text?: string;
+  ocr_status?: string;
+  ocr_error?: string;
   vision_summary?: string;
+  vision_error?: string;
   status?: string;
 }
 
@@ -89,6 +92,10 @@ export interface EvidenceItem {
   image_path?: string | null;
   bbox_json?: string | null;
   related_images?: RelatedImageInfo[];
+  quality_label?: string;
+  quality_reasons?: string[];
+  selection_status?: string;
+  rejection_reason?: string;
 }
 
 export interface RuntimeStep {
@@ -118,6 +125,42 @@ export interface RetrievalDebugItem {
   used_in_answer: boolean;
   used_in_prompt: boolean;
   quote: string;
+  quality_label?: string;
+  quality_reasons?: string[];
+  selection_status?: string;
+  rejection_reason?: string;
+}
+
+export interface EvidenceQualityTraceItem {
+  citation_id?: string;
+  chunk_id: string;
+  document_id: string;
+  paper_name?: string;
+  page: number;
+  page_start?: number | null;
+  page_end?: number | null;
+  section?: string | null;
+  chunk_type?: string;
+  candidate_rank: number;
+  selected_rank?: number | null;
+  selection_status: string;
+  quality_label: string;
+  quality_reasons: string[];
+  rejection_reason?: string;
+  score: number;
+  relevance_score: number;
+  readability_score: number;
+  vector_score?: number | null;
+  sparse_score?: number | null;
+  rule_score?: number | null;
+  rrf_score?: number | null;
+  final_score?: number | null;
+  score_source?: string;
+  matched_keywords?: string[];
+  judge_verdict?: string;
+  judge_reason?: string;
+  judge_confidence?: number | null;
+  quote?: string;
 }
 
 export interface EvidenceJudgment {
@@ -150,7 +193,11 @@ export interface VisualOcrWarning {
   image_count?: number;
   vision_ready_count?: number;
   unfinished_count?: number;
+  ocr_failed_count?: number;
+  ocr_empty_count?: number;
+  ocr_skipped_count?: number;
   status_counts?: Record<string, number>;
+  ocr_status_counts?: Record<string, number>;
   message: string;
 }
 
@@ -197,11 +244,24 @@ export interface RagTrace {
   retrieval_strategy?: string;
   retrieval_pipeline?: string;
   ranking_method?: string;
+  embedding_requested_model?: string;
+  embedding_provider?: string;
+  embedding_used_fallback?: boolean;
+  embedding_fallback_reason?: string;
+  embedding_document_fallback_count?: number;
+  embedding_document_providers?: Record<string, string>;
   answer_strategy?: string;
   fallback_used?: boolean;
   evidence_quality?: string;
+  evidence_coverage?: {
+    should_refuse?: boolean;
+    reason_code?: string;
+    reason?: string;
+    metrics?: Record<string, unknown>;
+  };
   diagnosis?: string;
   retrieval_debug?: RetrievalDebugItem[];
+  evidence_quality_trace?: EvidenceQualityTraceItem[];
   compound_tasks?: string[];
   task_parse_reason?: string;
   evidence_judgments?: EvidenceJudgment[];

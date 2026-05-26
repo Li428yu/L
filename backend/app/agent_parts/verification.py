@@ -26,6 +26,7 @@ class AgentVerificationMixin:
                 **state,
                 "evidence_judgments": [],
                 "evidence_quality": "none",
+                "evidence_quality_trace": state.get("evidence_quality_trace", []),
                 "runtime": [
                     *state.get("runtime", []),
                     RuntimeStep(
@@ -65,8 +66,11 @@ class AgentVerificationMixin:
                 next_citation = citation_by_chunk.get(str(judgment.get("chunk_id", "")))
                 if next_citation:
                     judgment["citation_id"] = next_citation
-        elif not strict:
-            kept = evidence
+            failure_closed_detail = ""
+        else:
+            failure_closed_detail = (
+                "没有候选证据通过裁判；本轮不会回填原始候选，后续回答会按证据不足处理。"
+            )
 
         evidence_quality = self._evidence_quality(
             question=question,
@@ -74,10 +78,21 @@ class AgentVerificationMixin:
             fallback_used=False,
             answer_strategy="model_answer",
         )
+        merge_quality_trace = getattr(self, "_merge_evidence_judgments_into_quality_trace", None)
+        evidence_quality_trace = (
+            merge_quality_trace(
+                trace=state.get("evidence_quality_trace", []),
+                judgments=judgments,
+                kept=kept,
+            )
+            if merge_quality_trace
+            else state.get("evidence_quality_trace", [])
+        )
         return {
             **state,
             "evidence": kept,
             "evidence_judgments": judgments,
+            "evidence_quality_trace": evidence_quality_trace,
             "evidence_quality": evidence_quality,
             "runtime": [
                 *state.get("runtime", []),
@@ -89,6 +104,7 @@ class AgentVerificationMixin:
                         f"直接 {verdict_counts.get('direct', 0)} 条、辅助 {verdict_counts.get('supporting', 0)} 条、"
                         f"背景 {verdict_counts.get('background', 0)} 条、拒绝 {verdict_counts.get('reject', 0)} 条；"
                         f"最终保留 {len(kept)} 条进入回答。"
+                        f"{failure_closed_detail}"
                     ),
                 ),
             ],
@@ -179,14 +195,20 @@ class AgentVerificationMixin:
         evidence: list[EvidenceItem],
         fallback_used: bool,
         verification: dict[str, Any] | None = None,
+        embedding_trace: dict[str, Any] | None = None,
     ) -> str:
         verification = verification or {}
+        embedding_trace = embedding_trace or {}
         if verification.get("status") == "fail":
             return f"交叉验证未通过：{verification.get('summary', '回答和证据引用存在不一致。')}"
         if verification.get("status") == "warn":
             return f"交叉验证提示：{verification.get('summary', '部分证据支撑较弱，需要谨慎阅读。')}"
         if answer_strategy == "model_unavailable":
             return "模型调用失败或超时；按当前配置，本轮未使用本地规则生成替代答案。"
+        if embedding_trace.get("embedding_used_fallback"):
+            reason = str(embedding_trace.get("embedding_fallback_reason") or "").strip()
+            suffix = f"原因：{reason}" if reason else "请检查 embedding 服务配置、额度或网络。"
+            return f"Embedding 已降级为本地备用检索，本轮召回质量可能下降。{suffix}"
         if fallback_used:
             return "模型调用失败或超时，本轮已改用原文证据和本地规则生成回答。"
         if answer_strategy == "missing_evidence_refusal":
@@ -248,6 +270,10 @@ class AgentVerificationMixin:
                     used_in_answer=f"[{item.citation_id}]" in answer,
                     used_in_prompt=f"[{item.citation_id}]" in prompt_text,
                     quote=self._best_quote_for_question(question, item.text, limit=180),
+                    quality_label=item.quality_label,
+                    quality_reasons=item.quality_reasons,
+                    selection_status=item.selection_status,
+                    rejection_reason=item.rejection_reason,
                 )
             )
         return items

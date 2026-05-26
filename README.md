@@ -2,7 +2,7 @@
 
 这是一个面向教学展示的论文阅读助手 Demo。它不只让用户和论文对话，也会把每一轮回答背后的 RAG 链路、技术栈分层、证据来源和记忆过程展示出来，帮助初学者看懂“论文阅读 Agent”内部发生了什么。
 
-当前主线已经从早期 Streamlit demo 重构为前后端分离项目：
+当前主线是前后端分离项目：
 
 - 前端：React + Vite
 - 后端：FastAPI
@@ -11,7 +11,7 @@
 - 元数据存储：SQLite
 - 文档解析：PyMuPDF + python-docx
 
-早期脚本版本已经移动到 `legacy/`，只作为历史 demo 保留。主项目入口是 `backend/` 和 `frontend/`。
+主项目入口是 `backend/` 和 `frontend/`。
 
 ## 当前能力
 
@@ -116,7 +116,7 @@ http://127.0.0.1:8000/docs
 3. 后台任务读取文档文本。
 4. 系统根据页数、段落密度、语言、公式/表格比例自动选择 chunk size、overlap 和 splitter。
 5. 每个 chunk 保存 `document_id`、`paper_name`、`page`、`section`、`source`、`file_hash`、`char_start`、`char_end`。
-6. 调用 embedding 模型生成向量；如果远程 embedding 暂时失败，会降级到本地备用检索。
+6. 调用 embedding 模型生成向量；如果明确选择 `local-hash-embedding-v1`，则使用可复现的本地哈希向量作为本地基线。若请求远程 embedding 但服务不可用，系统会记录为 fallback，相关评测不可作为可信横向对比。
 7. chunk、embedding、metadata 写入 Chroma 持久化向量库。
 8. 用户提问时，LangGraph 读取记忆，判断是否需要检索。
 9. retriever 节点同时运行 Dense 向量召回和 BM25 sparse 召回，并只合并少量结构化候选，例如字段、参考文献和文档概览。
@@ -143,13 +143,6 @@ answer -> verifier -> memory_writer
 
 固定问题评测集仍保留在后端和 `evals/` 目录中，用于开发阶段做回归测试；它不再出现在普通问答页面里，避免用户误以为系统在回答当前问题时额外跑了多个问题。
 
-## Legacy Demo
+评测默认基线由 `evals/baselines.json` 管理。当前默认只跑 `pdf_gold_current`，也就是带 `expected_chunk_ids` 的 PDF gold 基线；缺失本地 DOCX 文档的网络程序设计和 PDF/DOCX 混合基线已标记为 paused，避免不可运行 case 污染平均分。
 
-旧版 Streamlit demo 在 `legacy/`。如需运行旧版，需要额外安装：
-
-```powershell
-.venv\Scripts\python -m pip install -r requirements-legacy.txt
-.\legacy\start_app.ps1
-```
-
-主项目不再依赖 Streamlit。
+每轮评测会额外输出分级报告：单条 case 有 `result_status`、`failure_categories` 和 `grading_reasons`，整轮结果有 `result_status_counts`、`failure_category_counts`、`evaluation_trustworthy` 和 `trust_gate_status`。如果发生 embedding fallback，本轮会被标为 `not_comparable`，只能用于诊断，不能作为可信基线或横向对比成绩。

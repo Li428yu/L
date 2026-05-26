@@ -64,7 +64,10 @@ class RelatedImageInfo(BaseModel):
     kind: str
     caption_text: str = ""
     ocr_text: str = ""
+    ocr_status: str = ""
+    ocr_error: str = ""
     vision_summary: str = ""
+    vision_error: str = ""
     status: str = ""
 
 
@@ -97,6 +100,10 @@ class EvidenceItem(BaseModel):
     image_path: str | None = None
     bbox_json: str | None = None
     related_images: list[RelatedImageInfo] = Field(default_factory=list)
+    quality_label: str = ""
+    quality_reasons: list[str] = Field(default_factory=list)
+    selection_status: str = ""
+    rejection_reason: str = ""
 
 
 class RuntimeStep(BaseModel):
@@ -126,6 +133,42 @@ class RetrievalDebugItem(BaseModel):
     used_in_answer: bool = False
     used_in_prompt: bool = False
     quote: str
+    quality_label: str = ""
+    quality_reasons: list[str] = Field(default_factory=list)
+    selection_status: str = ""
+    rejection_reason: str = ""
+
+
+class EvidenceQualityTraceItem(BaseModel):
+    citation_id: str = ""
+    chunk_id: str
+    document_id: str
+    paper_name: str = ""
+    page: int = 0
+    page_start: int | None = None
+    page_end: int | None = None
+    section: str | None = None
+    chunk_type: str = "text"
+    candidate_rank: int
+    selected_rank: int | None = None
+    selection_status: str
+    quality_label: str
+    quality_reasons: list[str] = Field(default_factory=list)
+    rejection_reason: str = ""
+    score: float
+    relevance_score: float
+    readability_score: float
+    vector_score: float | None = None
+    sparse_score: float | None = None
+    rule_score: float | None = None
+    rrf_score: float | None = None
+    final_score: float | None = None
+    score_source: str = ""
+    matched_keywords: list[str] = Field(default_factory=list)
+    judge_verdict: str = ""
+    judge_reason: str = ""
+    judge_confidence: float | None = None
+    quote: str = ""
 
 
 class RagTrace(BaseModel):
@@ -140,11 +183,19 @@ class RagTrace(BaseModel):
     retrieval_strategy: str = ""
     retrieval_pipeline: str = ""
     ranking_method: str = ""
+    embedding_requested_model: str = ""
+    embedding_provider: str = ""
+    embedding_used_fallback: bool = False
+    embedding_fallback_reason: str = ""
+    embedding_document_fallback_count: int = 0
+    embedding_document_providers: dict[str, str] = Field(default_factory=dict)
     answer_strategy: str = ""
     fallback_used: bool = False
     evidence_quality: str = ""
+    evidence_coverage: dict[str, Any] = Field(default_factory=dict)
     diagnosis: str = ""
     retrieval_debug: list[RetrievalDebugItem] = Field(default_factory=list)
+    evidence_quality_trace: list[EvidenceQualityTraceItem] = Field(default_factory=list)
     compound_tasks: list[str] = Field(default_factory=list)
     task_parse_reason: str = ""
     evidence_judgments: list[dict[str, Any]] = Field(default_factory=list)
@@ -239,7 +290,10 @@ class DocumentImageInfo(BaseModel):
     height: int
     kind: str
     ocr_text: str
+    ocr_status: str = ""
+    ocr_error: str = ""
     vision_summary: str
+    vision_error: str = ""
     caption_text: str
     status: str
     created_at: str
@@ -257,6 +311,7 @@ class EvaluationCase(BaseModel):
     expected_pages: list[int] = Field(default_factory=list)
     expected_evidence_keywords: list[str] = Field(default_factory=list)
     expected_modalities: list[str] = Field(default_factory=list)
+    expected_chunk_ids: list[str] = Field(default_factory=list)
     relation_keywords: list[str] = Field(default_factory=list)
     required_document_count: int | None = None
     expected_claims: list[str] = Field(default_factory=list)
@@ -268,6 +323,7 @@ class EvaluationCase(BaseModel):
 
 class EvaluationRunRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
+    baseline_id: str | None = None
     suite_name: str | None = None
     suite_path: str | None = None
     case_ids: list[str] = Field(default_factory=list)
@@ -291,11 +347,23 @@ class EvaluationResult(BaseModel):
     keyword_hit_rate: float
     context_precision: float = 0.0
     context_recall: float = 0.0
+    gold_chunk_count: int = 0
+    gold_chunk_recall_at_1: float = 0.0
+    gold_chunk_recall_at_3: float = 0.0
+    gold_chunk_recall_at_5: float = 0.0
+    gold_chunk_recall_at_k: float = 0.0
+    gold_chunk_hit_ids: list[str] = Field(default_factory=list)
+    gold_chunk_missed_ids: list[str] = Field(default_factory=list)
+    gold_chunk_candidate_recall_at_k: float = 0.0
+    gold_chunk_candidate_hit_ids: list[str] = Field(default_factory=list)
+    gold_chunk_candidate_missed_ids: list[str] = Field(default_factory=list)
     document_coverage: float = 1.0
     image_evidence_hit: bool = True
     visual_evidence_hit: bool = True
+    visual_summary_hit: bool = True
     table_evidence_hit: bool = True
     ocr_evidence_hit: bool = True
+    ocr_text_hit: bool = True
     citation_accuracy: float = 1.0
     answer_relevance: float = 0.0
     faithfulness_proxy: float = 0.0
@@ -304,12 +372,17 @@ class EvaluationResult(BaseModel):
     refusal_correctness: float = 1.0
     relation_hit: float = 1.0
     visual_warning_count: int = 0
+    embedding_used_fallback: bool = False
     judge_used: bool = False
     judge_score: float = 0.0
     judge_scores: dict[str, float] = Field(default_factory=dict)
     judge_reason: str = ""
     score: float = 0.0
     score_breakdown: dict[str, float] = Field(default_factory=dict)
+    result_status: str = ""
+    failure_categories: list[str] = Field(default_factory=list)
+    grading_reasons: list[str] = Field(default_factory=list)
+    grading_report: dict[str, Any] = Field(default_factory=dict)
     latency_ms: int
 
 
@@ -327,11 +400,19 @@ class EvaluationRun(BaseModel):
     avg_keyword_hit_rate: float
     avg_context_precision: float = 0.0
     avg_context_recall: float = 0.0
+    gold_chunk_case_count: int = 0
+    avg_gold_chunk_recall_at_1: float = 0.0
+    avg_gold_chunk_recall_at_3: float = 0.0
+    avg_gold_chunk_recall_at_5: float = 0.0
+    avg_gold_chunk_recall_at_k: float = 0.0
+    avg_gold_chunk_candidate_recall_at_k: float = 0.0
     avg_document_coverage: float = 1.0
     avg_image_evidence_hit_rate: float = 1.0
     avg_visual_evidence_hit_rate: float = 1.0
+    avg_visual_summary_hit_rate: float = 1.0
     avg_table_evidence_hit_rate: float = 1.0
     avg_ocr_evidence_hit_rate: float = 1.0
+    avg_ocr_text_hit_rate: float = 1.0
     avg_citation_accuracy: float = 1.0
     avg_answer_relevance: float = 0.0
     avg_faithfulness_proxy: float = 0.0
@@ -340,9 +421,17 @@ class EvaluationRun(BaseModel):
     avg_refusal_correctness: float = 1.0
     avg_relation_hit: float = 1.0
     avg_visual_warning_count: float = 0.0
+    embedding_fallback_count: int = 0
+    embedding_fallback_rate: float = 0.0
     avg_judge_score: float = 0.0
     judge_coverage: float = 0.0
     segment_metrics: dict[str, dict[str, float]] = Field(default_factory=dict)
+    result_status_counts: dict[str, int] = Field(default_factory=dict)
+    failure_category_counts: dict[str, int] = Field(default_factory=dict)
+    grading_summary: dict[str, Any] = Field(default_factory=dict)
+    evaluation_trustworthy: bool = True
+    trust_gate_status: str = "passed"
+    trust_gate_failures: list[dict[str, Any]] = Field(default_factory=list)
     experiment_metadata: dict[str, Any] = Field(default_factory=dict)
     avg_score: float = 0.0
     avg_latency_ms: int

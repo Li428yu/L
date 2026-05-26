@@ -47,7 +47,7 @@ button {
   grid-template-columns:
     var(--history-width, 280px)
     8px
-    minmax(520px, 1fr)
+    minmax(360px, 1fr)
     8px
     var(--source-width, 420px);
   gap: 0;
@@ -371,6 +371,7 @@ details small {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 .empty-chat {
@@ -402,14 +403,17 @@ details small {
 }
 
 .message-row {
+  width: 100%;
+  max-width: 100%;
   display: grid;
-  grid-template-columns: 42px minmax(0, 720px);
+  grid-template-columns: 42px minmax(0, min(720px, calc(100% - 54px)));
   gap: 12px;
+  min-width: 0;
 }
 
 .message-row.user {
   justify-content: end;
-  grid-template-columns: minmax(0, 720px) 42px;
+  grid-template-columns: minmax(0, min(720px, calc(100% - 54px))) 42px;
 }
 
 .message-row.user .avatar {
@@ -443,7 +447,9 @@ details small {
   border: 1px solid var(--line);
   line-height: 1.68;
   min-width: 0;
-  overflow-wrap: break-word;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .thinking {
@@ -454,7 +460,9 @@ details small {
 .answer-markdown {
   display: grid;
   gap: 12px;
-  max-width: 76ch;
+  width: 100%;
+  max-width: min(76ch, 100%);
+  min-width: 0;
 }
 
 .answer-markdown p,
@@ -464,6 +472,8 @@ details small {
 .answer-markdown h4,
 .answer-markdown table {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .answer-markdown h3 {
@@ -525,6 +535,8 @@ details small {
   padding: 9px 11px;
   vertical-align: top;
   text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .answer-markdown th:last-child,
@@ -600,16 +612,19 @@ details small {
 
 .attachment-tray {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 30px;
+  max-height: 104px;
   margin-bottom: 10px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .attachment-tray::-webkit-scrollbar {
-  display: none;
+  width: 6px;
 }
 
 .attachment-chip,
@@ -624,14 +639,23 @@ details small {
 }
 
 .attachment-chip {
+  flex: 0 1 min(360px, 100%);
   color: var(--accent);
   font-weight: 800;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  max-width: 260px;
+  max-width: min(360px, 68vw);
+  min-width: 0;
+  padding-right: 7px;
+  overflow: visible;
+}
+
+.attachment-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attachment-chip.processing,
@@ -697,9 +721,10 @@ details small {
 
 .composer-row {
   display: grid;
-  grid-template-columns: 52px 1fr 94px;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(76px, 94px);
   gap: 12px;
   align-items: end;
+  min-width: 0;
 }
 
 .attach-button {
@@ -720,6 +745,8 @@ details small {
 }
 
 textarea {
+  width: 100%;
+  min-width: 0;
   min-height: 56px;
   max-height: 160px;
   resize: vertical;
@@ -845,6 +872,15 @@ mark {
   background: #fafbf8;
 }
 
+.image-zoom-trigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border-radius: 10px;
+  background: #fff;
+  cursor: zoom-in;
+}
+
 .evidence-image-preview img {
   display: block;
   width: 100%;
@@ -931,6 +967,68 @@ mark {
   border-radius: 16px;
 }
 
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 29, 24, 0.72);
+}
+
+.image-lightbox-content {
+  width: min(1120px, 100%);
+  max-height: calc(100vh - 48px);
+  display: grid;
+  gap: 10px;
+  border-radius: 18px;
+  padding: 14px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+}
+
+.image-lightbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.image-lightbox-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.image-lightbox-head button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel-soft);
+  color: var(--accent);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.image-lightbox-content img {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 170px);
+  object-fit: contain;
+  border-radius: 12px;
+  background: #f7f8f4;
+}
+
+.image-lightbox-content p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .developer-card {
   margin-top: 14px;
 }
@@ -986,6 +1084,16 @@ mark {
 
 .question-card strong {
   color: var(--ink);
+}
+
+.warning-card {
+  border-color: #f2c879;
+  background: #fff8e7;
+}
+
+.warning-card span {
+  background: #fff0c2;
+  color: #8a5a00;
 }
 
 .question-card small {

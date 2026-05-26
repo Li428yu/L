@@ -15,11 +15,32 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from backend.app.config import Settings
 
 
+LOCAL_HASH_EMBEDDING_PROVIDER = "local-hash-embedding-v1"
+LOCAL_FALLBACK_EMBEDDING_PROVIDER = "本地备用检索"
+LOCAL_EMBEDDING_PROVIDERS = {
+    LOCAL_HASH_EMBEDDING_PROVIDER,
+    LOCAL_FALLBACK_EMBEDDING_PROVIDER,
+}
+
+
+def is_local_embedding_provider(model: str | None) -> bool:
+    return str(model or "").strip() in LOCAL_EMBEDDING_PROVIDERS
+
+
 @dataclass(frozen=True)
 class EmbeddingResult:
     vectors: list[list[float]]
     provider: str
     used_fallback: bool
+    fallback_reason: str = ""
+
+
+@dataclass(frozen=True)
+class QueryEmbeddingResult:
+    vector: list[float]
+    provider: str
+    used_fallback: bool
+    fallback_reason: str = ""
 
 
 class ModelClients:
@@ -168,6 +189,12 @@ class ModelClients:
     ) -> EmbeddingResult:
         if not texts:
             return EmbeddingResult(vectors=[], provider="none", used_fallback=False)
+        if model == LOCAL_HASH_EMBEDDING_PROVIDER:
+            return EmbeddingResult(
+                vectors=[self._local_embedding(text) for text in texts],
+                provider=LOCAL_HASH_EMBEDDING_PROVIDER,
+                used_fallback=False,
+            )
         try:
             client = self.embeddings(model)
             vectors = self._with_retry(lambda: client.embed_documents(texts))
@@ -177,6 +204,7 @@ class ModelClients:
                 used_fallback=False,
             )
         except Exception as exc:
+            fallback_reason = self._embedding_error_summary(exc)
             if self._should_try_multimodal_embeddings(exc, model):
                 try:
                     resolved_model = model or self.settings.default_embedding_model
@@ -185,28 +213,63 @@ class ModelClients:
                         provider=resolved_model,
                         used_fallback=False,
                     )
-                except Exception:
-                    pass
+                except Exception as multimodal_exc:
+                    fallback_reason = (
+                        f"{fallback_reason}; multimodal embedding failed: "
+                        f"{self._embedding_error_summary(multimodal_exc)}"
+                    )
             return EmbeddingResult(
                 vectors=[self._local_embedding(text) for text in texts],
-                provider="本地备用检索",
+                provider=LOCAL_FALLBACK_EMBEDDING_PROVIDER,
                 used_fallback=True,
+                fallback_reason=fallback_reason[:500],
             )
 
     def embed_query(self, text: str, model: str | None = None) -> list[float]:
-        if model == "本地备用检索":
-            return self._local_embedding(text)
+        return self.embed_query_with_info(text, model=model).vector
+
+    def embed_query_with_info(self, text: str, model: str | None = None) -> QueryEmbeddingResult:
+        if model == LOCAL_HASH_EMBEDDING_PROVIDER:
+            return QueryEmbeddingResult(
+                vector=self._local_embedding(text),
+                provider=LOCAL_HASH_EMBEDDING_PROVIDER,
+                used_fallback=False,
+            )
+        if model == LOCAL_FALLBACK_EMBEDDING_PROVIDER:
+            return QueryEmbeddingResult(
+                vector=self._local_embedding(text),
+                provider=LOCAL_FALLBACK_EMBEDDING_PROVIDER,
+                used_fallback=True,
+                fallback_reason="目标文档使用本地备用检索索引，查询向量需保持同一向量空间。",
+            )
         try:
             client = self.embeddings(model)
-            return self._with_retry(lambda: client.embed_query(text))
+            return QueryEmbeddingResult(
+                vector=self._with_retry(lambda: client.embed_query(text)),
+                provider=model or self.settings.default_embedding_model,
+                used_fallback=False,
+            )
         except Exception as exc:
+            fallback_reason = self._embedding_error_summary(exc)
             if self._should_try_multimodal_embeddings(exc, model):
                 try:
                     resolved_model = model or self.settings.default_embedding_model
-                    return self._embed_texts_with_multimodal_api([text], resolved_model)[0]
-                except Exception:
-                    pass
-            return self._local_embedding(text)
+                    return QueryEmbeddingResult(
+                        vector=self._embed_texts_with_multimodal_api([text], resolved_model)[0],
+                        provider=resolved_model,
+                        used_fallback=False,
+                    )
+                except Exception as multimodal_exc:
+                    fallback_reason = (
+                        f"{fallback_reason}; multimodal embedding failed: "
+                        f"{self._embedding_error_summary(multimodal_exc)}"
+                    )
+            return QueryEmbeddingResult(
+                vector=self._local_embedding(text),
+                provider=LOCAL_FALLBACK_EMBEDDING_PROVIDER,
+                used_fallback=True,
+                fallback_reason=fallback_reason[:500],
+            )
 
     def _with_retry(self, fn):
         last_error: Exception | None = None
@@ -222,6 +285,11 @@ class ModelClients:
         raise RuntimeError(
             "模型接口暂时不可用，已经自动重试但仍失败。请检查 API key、模型名、额度或网络。"
         ) from last_error
+
+    def _embedding_error_summary(self, exc: Exception) -> str:
+        message = str(exc).strip() or exc.__class__.__name__
+        message = re.sub(r"\s+", " ", message)
+        return f"{exc.__class__.__name__}: {message}"[:300]
 
     def _require_api_key(self) -> None:
         if not self.settings.api_key:

@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 
 from backend.app.agent_parts.events import AgentEvent, final_event, status_event, token_event
 from backend.app.agent_parts.answering import AgentAnsweringMixin
+from backend.app.agent_parts.evidence_coverage import AgentEvidenceCoverageMixin
 from backend.app.agent_parts.planning import AgentPlanningMixin
 from backend.app.agent_parts.retrieval import AgentRetrievalMixin
 from backend.app.agent_parts.state import (
@@ -41,6 +42,7 @@ class PaperAgentService(
     AgentPlanningMixin,
     AgentRetrievalMixin,
     AgentVerificationMixin,
+    AgentEvidenceCoverageMixin,
     AgentAnsweringMixin,
     AgentTextUtilityMixin,
 ):
@@ -100,6 +102,7 @@ class PaperAgentService(
             "retrieval_attempts": 0,
             "retrieval_pipeline": "",
             "ranking_method": "",
+            "embedding_trace": {},
         }
 
         final_state = state
@@ -140,11 +143,16 @@ class PaperAgentService(
         evidence = state.get("evidence", [])
         answer = state.get("answer", "本轮没有生成可用回答。")
         visible_evidence = self.attach_related_images(
-            self._visible_evidence_for_answer(answer, evidence),
+            self._visible_evidence_for_answer(
+                answer,
+                evidence,
+                question=request.question,
+            ),
             question=request.question,
         )
         runtime = state.get("runtime", [])
         final_prompt_evidence = state.get("final_prompt_evidence", [])
+        evidence_quality_trace = state.get("evidence_quality_trace", [])
         evidence_judgments = state.get("evidence_judgments", [])
         verification = state.get("verification", {})
         multi_document_cards = state.get("multi_document_cards", [])
@@ -158,8 +166,10 @@ class PaperAgentService(
         )
         retrieval_pipeline = state.get("retrieval_pipeline", "")
         ranking_method = state.get("ranking_method", "")
+        embedding_trace = state.get("embedding_trace", {}) or {}
         answer_strategy = state.get("answer_strategy") or "model_answer"
         fallback_used = bool(state.get("fallback_used", False))
+        evidence_coverage = state.get("evidence_coverage", {}) or {}
         evidence_quality = state.get("evidence_quality") or self._evidence_quality(
             question=request.question,
             evidence=evidence,
@@ -174,6 +184,7 @@ class PaperAgentService(
             evidence=evidence,
             fallback_used=fallback_used,
             verification=verification,
+            embedding_trace=embedding_trace,
         )
         retrieval_debug = self._build_retrieval_debug(
             question=request.question,
@@ -226,11 +237,19 @@ class PaperAgentService(
                 retrieval_strategy=retrieval_strategy,
                 retrieval_pipeline=retrieval_pipeline,
                 ranking_method=ranking_method,
+                embedding_requested_model=str(embedding_trace.get("embedding_requested_model") or ""),
+                embedding_provider=str(embedding_trace.get("embedding_provider") or ""),
+                embedding_used_fallback=bool(embedding_trace.get("embedding_used_fallback", False)),
+                embedding_fallback_reason=str(embedding_trace.get("embedding_fallback_reason") or ""),
+                embedding_document_fallback_count=int(embedding_trace.get("embedding_document_fallback_count") or 0),
+                embedding_document_providers=dict(embedding_trace.get("embedding_document_providers") or {}),
                 answer_strategy=answer_strategy,
                 fallback_used=fallback_used,
                 evidence_quality=evidence_quality,
+                evidence_coverage=evidence_coverage,
                 diagnosis=diagnosis,
                 retrieval_debug=retrieval_debug,
+                evidence_quality_trace=evidence_quality_trace,
                 compound_tasks=compound_tasks,
                 task_parse_reason=task_parse_reason,
                 evidence_judgments=evidence_judgments,
@@ -247,11 +266,48 @@ class PaperAgentService(
         self,
         answer: str,
         evidence: list[EvidenceItem],
+        *,
+        question: str = "",
+        limit: int = 6,
     ) -> list[EvidenceItem]:
-        cited_ids = set(self._citation_ids_from_answer(answer))
-        if not cited_ids:
+        if not evidence:
             return []
-        return [item for item in evidence if item.citation_id in cited_ids]
+        limit = max(1, limit)
+        cited_ids = set(self._citation_ids_from_answer(answer))
+        visible: list[EvidenceItem] = [
+            item for item in evidence if item.citation_id in cited_ids
+        ]
+        visible_chunks = {f"{item.document_id}:{item.chunk_id}" for item in visible}
+
+        direct_support_scorer = getattr(self, "_final_evidence_direct_support_score", None)
+        if not callable(direct_support_scorer):
+            return visible[:limit]
+
+        visual_checker = getattr(self, "_question_requires_visual_evidence", None)
+        visual_question = bool(callable(visual_checker) and visual_checker(question))
+        supplemental: list[tuple[float, int, EvidenceItem]] = []
+        for position, item in enumerate(evidence):
+            key = f"{item.document_id}:{item.chunk_id}"
+            if key in visible_chunks:
+                continue
+            score = float(direct_support_scorer(question=question, item=item) or 0.0)
+            if self._is_visual_evidence_item(item):
+                if visual_question:
+                    score += 0.35
+                else:
+                    score -= 0.45
+            threshold = 1.35 if visual_question and self._is_visual_evidence_item(item) else 2.0
+            if score < threshold:
+                continue
+            supplemental.append((score, position, item))
+
+        supplemental.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        room = max(0, min(2, limit - len(visible)))
+        for _, _, item in supplemental[:room]:
+            visible.append(item)
+        if not visible and supplemental:
+            visible.append(supplemental[0][2])
+        return visible[:limit]
 
     def attach_related_images(
         self,
@@ -315,7 +371,10 @@ class PaperAgentService(
                     kind=str(image.get("kind") or "image"),
                     caption_text=str(image.get("caption_text") or ""),
                     ocr_text=str(image.get("ocr_text") or ""),
+                    ocr_status=str(image.get("ocr_status") or ""),
+                    ocr_error=str(image.get("ocr_error") or ""),
                     vision_summary=str(image.get("vision_summary") or ""),
+                    vision_error=str(image.get("vision_error") or ""),
                     status=str(image.get("status") or ""),
                 )
             ))
@@ -365,11 +424,17 @@ class PaperAgentService(
                 continue
 
             status_counts: dict[str, int] = {}
+            ocr_status_counts: dict[str, int] = {}
             for image in images:
                 status = str(image.get("status") or "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
+                ocr_status = str(image.get("ocr_status") or "unknown")
+                ocr_status_counts[ocr_status] = ocr_status_counts.get(ocr_status, 0) + 1
             vision_ready_count = sum(1 for image in images if str(image.get("status") or "") == "vision_ready")
             ocr_text_count = sum(1 for image in images if str(image.get("ocr_text") or "").strip())
+            ocr_failed_count = ocr_status_counts.get("ocr_failed", 0)
+            ocr_empty_count = ocr_status_counts.get("ocr_empty", 0)
+            ocr_skipped_count = ocr_status_counts.get("ocr_skipped", 0)
             unfinished_count = sum(
                 count
                 for status, count in status_counts.items()
@@ -385,6 +450,7 @@ class PaperAgentService(
                         "paper_name": paper_name,
                         "image_count": len(images),
                         "status_counts": status_counts,
+                        "ocr_status_counts": ocr_status_counts,
                         "message": "问题需要视觉理解，但该文档图片尚无 vision_ready 记录，回答可能只依赖题注/OCR 或普通文本。",
                     }
                 )
@@ -399,7 +465,23 @@ class PaperAgentService(
                         "image_count": len(images),
                         "vision_ready_count": vision_ready_count,
                         "status_counts": status_counts,
+                        "ocr_status_counts": ocr_status_counts,
                         "message": "问题涉及 OCR/扫描文本，但图片记录中没有 OCR 文本；当前会退化为视觉摘要或图片证据。",
+                    }
+                )
+            if expects_ocr and (ocr_failed_count or ocr_empty_count or ocr_skipped_count):
+                warnings.append(
+                    {
+                        "type": "ocr_processing_not_fully_ready",
+                        "severity": "info",
+                        "document_id": document_id,
+                        "paper_name": paper_name,
+                        "image_count": len(images),
+                        "ocr_failed_count": ocr_failed_count,
+                        "ocr_empty_count": ocr_empty_count,
+                        "ocr_skipped_count": ocr_skipped_count,
+                        "ocr_status_counts": ocr_status_counts,
+                        "message": "OCR 证据不完整；信任图片文字覆盖率前应先检查 ocr_status_counts。",
                     }
                 )
             if unfinished_count and (expects_visual or expects_ocr):
@@ -412,6 +494,7 @@ class PaperAgentService(
                         "image_count": len(images),
                         "unfinished_count": unfinished_count,
                         "status_counts": status_counts,
+                        "ocr_status_counts": ocr_status_counts,
                         "message": "该文档仍有图片处于未完全视觉化/OCR 化状态，必要时应重新索引或提高视觉处理上限。",
                     }
                 )

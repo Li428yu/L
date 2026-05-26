@@ -66,22 +66,6 @@ export function deleteDocument(documentId: string): Promise<{ status: string }> 
   });
 }
 
-export function askPaper(payload: {
-  question: string;
-  conversation_id?: string | null;
-  document_ids: string[];
-  model_preset: string;
-  chat_model?: string;
-  embedding_model?: string;
-  top_k?: number;
-}): Promise<AskResponse> {
-  return request<AskResponse>("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-}
-
 export async function askPaperStream(
   payload: {
     question: string;

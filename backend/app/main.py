@@ -11,13 +11,17 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.app.agent import PaperAgentService
 from backend.app.config import settings
+from backend.app.eval_baselines import (
+    baseline_metadata,
+    resolve_eval_document_ids,
+    resolve_eval_suite_path as resolve_baseline_suite_path,
+)
 from backend.app.evaluation import load_eval_suite, run_eval_suite
 from backend.app.indexer import DocumentIndexer
 from backend.app.llm_clients import ModelClients
 from backend.app.memory import MemoryManager
 from backend.app.models import (
     AskRequest,
-    AskResponse,
     ChunkPreview,
     ConversationDetail,
     ConversationInfo,
@@ -63,7 +67,12 @@ agent = PaperAgentService(
 app = FastAPI(title=settings.app_name)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -326,16 +335,6 @@ def get_document_file(document_id: str) -> FileResponse:
     )
 
 
-@app.post("/api/chat", response_model=AskResponse)
-def chat(request: AskRequest) -> AskResponse:
-    if not request.question.strip():
-        raise HTTPException(status_code=400, detail="问题不能为空。")
-    try:
-        return agent.ask(request)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-
 @app.post("/api/chat/stream")
 def chat_stream(request: AskRequest) -> StreamingResponse:
     if not request.question.strip():
@@ -367,7 +366,7 @@ def _stream_event(event_type: str, payload: object) -> str:
 def run_evaluation(request: EvaluationRunRequest | list[str] = Body(...)) -> EvaluationRun:
     if isinstance(request, list):
         request = EvaluationRunRequest(document_ids=request)
-    suite_path = _resolve_eval_suite_path(request)
+    suite_path, baseline = _resolve_eval_suite_path(request)
     cases = load_eval_suite(suite_path)
     if request.case_ids:
         wanted = set(request.case_ids)
@@ -376,13 +375,16 @@ def run_evaluation(request: EvaluationRunRequest | list[str] = Body(...)) -> Eva
         cases = cases[: max(request.limit, 0)]
     if not cases:
         raise HTTPException(status_code=404, detail="没有找到评测集。")
-    document_ids = request.document_ids or [
-        document.id for document in store.list_documents() if document.status == "ready"
-    ]
+    document_ids = resolve_eval_document_ids(
+        documents=store.list_documents(),
+        cases=cases,
+        requested_document_ids=request.document_ids,
+        document_policy=baseline.document_policy if baseline else "expected_ready",
+    )
     if not document_ids:
         raise HTTPException(status_code=400, detail="没有可用于评测的已就绪文档。")
     return run_eval_suite(
-        suite_name=request.suite_name or suite_path.stem,
+        suite_name=baseline.suite_name if baseline else (request.suite_name or suite_path.stem),
         cases=cases,
         agent=agent,
         document_ids=document_ids,
@@ -392,25 +394,17 @@ def run_evaluation(request: EvaluationRunRequest | list[str] = Body(...)) -> Eva
         chat_model=request.chat_model,
         embedding_model=request.embedding_model,
         top_k=request.top_k,
+        experiment_metadata=baseline_metadata(baseline),
     )
 
 
-def _resolve_eval_suite_path(request: EvaluationRunRequest) -> Path:
-    if request.suite_path:
-        candidate = Path(request.suite_path)
-        if not candidate.is_absolute():
-            candidate = settings.project_root / candidate
-    else:
-        suite_name = (request.suite_name or "sample_eval_set").strip()
-        if not suite_name.endswith(".json"):
-            suite_name = f"{suite_name}.json"
-        candidate = settings.project_root / "evals" / suite_name
-    resolved = candidate.resolve()
-    eval_root = (settings.project_root / "evals").resolve()
+def _resolve_eval_suite_path(request: EvaluationRunRequest):
     try:
-        is_allowed = resolved.is_relative_to(eval_root)
-    except AttributeError:
-        is_allowed = str(resolved).startswith(str(eval_root))
-    if not is_allowed:
+        return resolve_baseline_suite_path(
+            eval_dir=settings.project_root / "evals",
+            suite_name=request.suite_name,
+            suite_path=request.suite_path,
+            baseline_id=request.baseline_id,
+        )
+    except ValueError:
         raise HTTPException(status_code=400, detail="评测集必须放在 evals 目录下。")
-    return resolved

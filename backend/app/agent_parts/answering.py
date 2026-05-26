@@ -15,6 +15,15 @@ from backend.app.agent_parts.state import (
 from backend.app.models import EvidenceItem, RetrievalDebugItem, RuntimeStep
 
 
+ANSWER_SYSTEM_PROMPT = (
+    "你是严谨友好的中文文档阅读助手。只基于本轮证据回答，不编造；关键事实必须用 [E1] 这类编号引用。"
+    "多文档问题先分文档再综合，不能把单篇结论写成共同结论。图片/图表/表格问题必须引用对应证据。"
+    "证据不足时说明缺什么并拒绝硬答；已有证据能回答时直接回答。"
+    "默认不输出作者、单位、日期、提交说明、参考文献或个人信息，除非用户明确询问。"
+    "优先短段落和列表；只有比较/差异/共同点/关系很清楚时才用标准 GFM 表格。"
+)
+
+
 class AgentAnsweringMixin:
     def _answer(self, state: PaperAgentState) -> PaperAgentState:
         self._emit_status("正在组织回答...")
@@ -66,7 +75,10 @@ class AgentAnsweringMixin:
             evidence=compact_model_prompt_evidence or state.get("evidence", []),
             soft_intent=state.get("soft_intent", {}),
         )
-        multi_document_context = self._format_multi_document_context_for_model_prompt(state)
+        multi_document_context = self._truncate_readable_text(
+            self._format_multi_document_context_for_model_prompt(state),
+            limit=1200,
+        )
         if not force_model_answer and self._looks_like_reference_question(state["question"]):
             answer = self._build_local_reference_answer(
                 state["question"],
@@ -96,6 +108,29 @@ class AgentAnsweringMixin:
                 runtime_detail="这是字段提取类问题，已只保留用户询问的字段内容，避免作者、单位、日期等相邻信息混入。",
             )
 
+        coverage_decision = self._evidence_coverage_decision(
+            state=state,
+            prompt_evidence=compact_model_prompt_evidence,
+        )
+        if coverage_decision.get("should_refuse"):
+            answer = self._build_evidence_coverage_refusal_answer(
+                question=state["question"],
+                evidence=state.get("evidence", []),
+                decision=coverage_decision,
+            )
+            return AnswerPlan(
+                mode="local",
+                local_answer=answer,
+                answer_strategy="missing_evidence_refusal",
+                final_prompt_evidence=final_prompt_evidence,
+                prompt_evidence=compact_model_prompt_evidence,
+                evidence_coverage=coverage_decision,
+                runtime_detail=(
+                    "证据覆盖硬门禁未通过，本轮拒绝硬答："
+                    f"{coverage_decision.get('reason') or coverage_decision.get('reason_code')}"
+                ),
+            )
+
         if not force_model_answer and state.get("needs_retrieval") and (
             not state.get("evidence", [])
             or self._should_decline_for_missing_direct_evidence(
@@ -116,51 +151,15 @@ class AgentAnsweringMixin:
                 runtime_detail="检索和证据裁判后仍缺少直接证据，本轮停止硬答。",
             )
 
-        system_prompt = (
-            "你是一个严谨、友好的中文文档阅读助手。用户说“这篇论文”“这份文档”时，"
-            "默认指当前已上传文档，不要要求用户重新提供标题。若当前有多篇文档且用户没有指定某一篇，"
-            "必须按文档分开回答，避免把几篇文档混成一个结论。回答必须优先基于检索证据，"
-            "遇到多文献选题时，先逐篇说明各自证据，再做关系综合：共同点、差异点、互补关系或冲突关系。"
-            "不要把单篇文献的结论写成所有文献的共同结论；只有多篇证据或文献关系结构同时支持时，才写成共同结论。"
-            "不要编造文档内容。使用证据时用 [E1]、[E2] 这样的编号引用。"
-            "如果证据中已经出现了答案，不要说文档没有提到；先逐条核对证据内容再下结论。"
-            "图片、截图、图表问题必须优先使用 Type 为 image、chart_image、figure 或 table 的证据，"
-            "并在对应事实后写该证据编号；不要输出没有编号的“图片描述”。"
-            "如果证据不足，要说明缺少什么，但只要已有证据能回答，就先直接回答。"
-            "不要输出姓名、学号、邮箱等个人信息，除非用户明确询问。"
-            "系统给出的任务理解只是候选，不是最终结论；你必须根据用户原话和证据重新判断真实意图，"
-            "不要机械地把某个词固定映射成某类任务。"
-            "如果问题像字段提取，只回答目标字段本身；如果问题是在解释、评价、比较或概括，不要只机械摘字段。"
-            "除非用户明确询问，不要输出作者、单位、日期、提交说明、参考文献等无关信息。"
-            "你可以使用简洁 Markdown（段落、编号列表、加粗），但引用证据只能使用 [E1]、[E2] 这种格式。"
-            "只有当用户要求比较、差异、共同点、互补关系、冲突关系、清单化评价，或多文献关系很适合横向对照时，才使用表格；"
-            "普通解释、概括、建议类问题优先用短段落和列表。"
-            "如果使用表格，必须输出标准 GFM Markdown 表格：表头、分隔线、每一行都各占一行；表格前后留空行；最多 5 列，过宽就拆成多个小表。"
-            "绝对不要把表头、分隔线和数据行压缩到同一行，也不要用“| |”表示换行；表格如果不能保证标准格式，就改用列表。"
-            "不要输出“Introduction依据”“Conclusion依据”“Abstract依据”等自造引用。"
+        system_prompt = ANSWER_SYSTEM_PROMPT
+        user_prompt = self._build_answer_user_prompt(
+            question=state["question"],
+            memory_prompt=state.get("memory_prompt", ""),
+            recent_history=recent_history,
+            question_understanding=question_understanding,
+            multi_document_context=multi_document_context,
+            evidence_blocks=evidence_blocks,
         )
-        user_prompt = f"""
-用户长期画像和偏好：
-{state.get("memory_prompt", "暂无")}
-
-最近对话历史：
-{recent_history}
-
-本轮问题：
-{state["question"]}
-
-任务理解候选：
-{question_understanding}
-
-多文献关系结构：
-{multi_document_context or "本轮不是多文献关系型问题，或没有足够文献关系可整理。"}
-
-检索证据：
-{evidence_blocks or "本轮没有检索到证据。"}
-
-        请给出适合非技术用户阅读的中文回答，并在关键事实后标注证据编号。只有横向比较明显更清楚时才使用表格；否则用自然段和列表。
-图片、截图、图表或评分表问题必须直接引用对应的图片/表格证据编号。
-""".strip()
 
         return AnswerPlan(
             mode="model",
@@ -171,6 +170,32 @@ class AgentAnsweringMixin:
             prompt_evidence=compact_model_prompt_evidence,
             runtime_detail="结合原文证据、用户偏好和最近对话生成最终回答。",
         )
+
+    def _build_answer_user_prompt(
+        self,
+        *,
+        question: str,
+        memory_prompt: str,
+        recent_history: str,
+        question_understanding: str,
+        multi_document_context: str,
+        evidence_blocks: str,
+    ) -> str:
+        sections = [
+            f"问题：{question}",
+            f"意图候选：{question_understanding or '未提供'}",
+            f"证据：\n{evidence_blocks or '本轮没有检索到证据。'}",
+        ]
+        if multi_document_context:
+            sections.insert(2, f"多文档结构：\n{multi_document_context}")
+        if recent_history:
+            sections.insert(1, f"最近对话：\n{recent_history}")
+        if memory_prompt and memory_prompt.strip() not in {"暂无", "无"}:
+            sections.insert(1, f"用户偏好：\n{self._truncate_readable_text(memory_prompt, limit=360)}")
+        sections.append(
+            "输出：中文、简洁；每个关键事实都引用最直接的证据编号。列表、定义、数字、图表问题必须引用包含该事实的证据，不要只引用背景证据。"
+        )
+        return "\n\n".join(sections)
 
     def _model_failure_answer_plan(
         self,
@@ -198,8 +223,9 @@ class AgentAnsweringMixin:
             **state,
             "answer": answer,
             "answer_strategy": plan.answer_strategy,
-            "fallback_used": plan.fallback_used,
+            "fallback_used": bool(state.get("fallback_used", False)) or plan.fallback_used,
             "final_prompt_evidence": plan.final_prompt_evidence,
+            "evidence_coverage": plan.evidence_coverage,
             "runtime": [
                 *state.get("runtime", []),
                 RuntimeStep(
@@ -291,6 +317,17 @@ class AgentAnsweringMixin:
 
         soft_intent = soft_intent or {}
         allow_references = self._looks_like_reference_question(question) or soft_intent.get("intent") == "reference_question"
+        direct_support_by_key: dict[str, float] = {}
+        direct_support_scorer = getattr(self, "_final_evidence_direct_support_score", None)
+        if callable(direct_support_scorer):
+            for item in evidence:
+                key = f"{item.document_id}:{item.chunk_id}"
+                direct_support_by_key[key] = float(direct_support_scorer(question=question, item=item) or 0.0)
+        has_text_direct_support = any(
+            direct_support_by_key.get(f"{item.document_id}:{item.chunk_id}", 0.0) >= 1.8
+            and not self._is_visual_evidence_item(item)
+            for item in evidence
+        )
         scored: list[tuple[float, int, EvidenceItem]] = []
         fallback: list[tuple[float, int, EvidenceItem]] = []
         for position, item in enumerate(evidence):
@@ -318,6 +355,17 @@ class AgentAnsweringMixin:
                 index=0,
                 total=1,
             )
+            direct_support_score = direct_support_by_key.get(f"{item.document_id}:{item.chunk_id}", 0.0)
+            protected_direct_support = direct_support_score >= 2.0
+            if protected_direct_support:
+                noise_penalty *= 0.25
+                soft_penalty = min(soft_penalty, 0.5)
+            modality_penalty = (
+                (0.95 if has_text_direct_support else 0.55)
+                if self._is_visual_evidence_item(item)
+                and not self._looks_like_visual_evidence_question(question)
+                else 0.0
+            )
             score = (
                 item.score
                 + relevance * 0.9
@@ -325,11 +373,13 @@ class AgentAnsweringMixin:
                 + role_score
                 + soft_focus * 0.35
                 + soft_role * 0.3
+                + direct_support_score * 0.45
                 - noise_penalty
                 - min(soft_penalty, 2.0) * 0.35
+                - modality_penalty
             )
             row = (score, position, item)
-            if noise_penalty >= 1.4 or soft_penalty >= 2.2:
+            if (noise_penalty >= 1.4 or soft_penalty >= 2.2) and not protected_direct_support:
                 fallback.append(row)
             else:
                 scored.append(row)
@@ -485,11 +535,11 @@ class AgentAnsweringMixin:
         if not text.strip():
             return ""
         if self._is_visual_evidence_item(item) and self._looks_like_visual_evidence_question(question):
-            return self._truncate_readable_text(text, limit=760)
+            return self._truncate_readable_text(text, limit=520)
         if self._is_table_evidence_item(item) and self._looks_like_metric_result_question(question) and item.quote:
-            return self._truncate_readable_text(item.quote, limit=900)
+            return self._truncate_readable_text(item.quote, limit=620)
         if self._is_table_evidence_item(item) and self._looks_like_table_question(question):
-            return self._truncate_readable_text(text, limit=640)
+            return self._truncate_readable_text(text, limit=500)
         if self._looks_like_debug_or_improvement_question(question):
             focused_debug = self._debug_or_improvement_quote(text)
             if focused_debug:
@@ -512,7 +562,7 @@ class AgentAnsweringMixin:
             or self._looks_like_dataset_or_scale_question(question)
             or self._looks_like_metric_result_question(question)
         ) and item.quote:
-            return self._truncate_readable_text(item.quote, limit=620)
+            return self._truncate_readable_text(item.quote, limit=480)
 
         focused = self._focused_sentences_for_question(question, text, limit=2)
         if not focused:
@@ -524,10 +574,10 @@ class AgentAnsweringMixin:
         ]
         cleaned = [sentence for sentence in cleaned if sentence]
         if not cleaned:
-            quote = self._best_quote_for_question(question, text, limit=360)
+            quote = self._best_quote_for_question(question, text, limit=300)
             cleaned = [self._trim_model_prompt_sentence(quote)] if quote else []
         summary = " ".join(cleaned)
-        return self._truncate_readable_text(summary, limit=420)
+        return self._truncate_readable_text(summary, limit=320)
 
     def _looks_like_visual_evidence_question(self, question: str) -> bool:
         keywords = ["图片", "图像", "截图", "运行截图", "图表", "图中", "视觉", "image", "figure", "chart"]
@@ -550,7 +600,7 @@ class AgentAnsweringMixin:
                 segment = re.sub(r"\s+", " ", match.group(0)).strip()
                 if segment and segment not in segments:
                     segments.append(segment)
-        return self._truncate_readable_text(" ".join(segments), limit=760) if segments else ""
+        return self._truncate_readable_text(" ".join(segments), limit=560) if segments else ""
 
     def _looks_like_flow_or_principle_question(self, question: str) -> bool:
         keywords = ["设计原理", "程序流程", "流程", "原理", "步骤"]
@@ -569,7 +619,7 @@ class AgentAnsweringMixin:
                 segment = re.sub(r"\s+", " ", match.group(0)).strip()
                 if segment and segment not in segments:
                     segments.append(segment)
-        return self._truncate_readable_text(" ".join(segments), limit=700) if segments else ""
+        return self._truncate_readable_text(" ".join(segments), limit=520) if segments else ""
 
     def _looks_like_client_server_design_question(self, question: str) -> bool:
         return (
@@ -591,7 +641,7 @@ class AgentAnsweringMixin:
                 segment = re.sub(r"\s+", " ", match.group(0)).strip()
                 if segment and segment not in segments:
                     segments.append(segment)
-        return self._truncate_readable_text(" ".join(segments), limit=760) if segments else ""
+        return self._truncate_readable_text(" ".join(segments), limit=560) if segments else ""
 
     def _is_visual_evidence_item(self, item: EvidenceItem) -> bool:
         chunk_type = (item.chunk_type or "").lower()
@@ -691,6 +741,23 @@ class AgentAnsweringMixin:
             ";",
         ]
         marker_hits = sum(normalized.count(marker) for marker in code_markers)
+        framework_hits = sum(
+            1
+            for term in [
+                "govern",
+                "map",
+                "measure",
+                "manage",
+                "identify",
+                "protect",
+                "detect",
+                "respond",
+                "recover",
+            ]
+            if re.search(rf"\b{re.escape(term)}\b", normalized.lower())
+        )
+        if framework_hits >= 3 and marker_hits < 8:
+            return False
         lines = [line.strip() for line in normalized.splitlines() if line.strip()]
         code_like_lines = sum(
             1
@@ -732,7 +799,7 @@ class AgentAnsweringMixin:
         if not messages:
             return "暂无。"
         lines = []
-        for item in messages[-8:]:
+        for item in messages[-4:]:
             role = "用户" if item.get("role") == "user" else "助手"
             content = str(item.get("content", "")).strip()
             if len(content) > 500:

@@ -131,7 +131,10 @@ class MetadataStore:
                     height integer not null,
                     kind text not null,
                     ocr_text text not null,
+                    ocr_status text not null default '',
+                    ocr_error text not null default '',
                     vision_summary text not null,
+                    vision_error text not null default '',
                     caption_text text not null,
                     status text not null,
                     created_at text not null,
@@ -139,6 +142,16 @@ class MetadataStore:
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("pragma table_info(document_images)").fetchall()
+            }
+            if "ocr_status" not in columns:
+                conn.execute("alter table document_images add column ocr_status text not null default ''")
+            if "ocr_error" not in columns:
+                conn.execute("alter table document_images add column ocr_error text not null default ''")
+            if "vision_error" not in columns:
+                conn.execute("alter table document_images add column vision_error text not null default ''")
 
     def upsert_document(
         self,
@@ -635,9 +648,10 @@ class MetadataStore:
                     insert into document_images (
                         id, document_id, image_hash, page_start, page_end, bbox_json,
                         image_path, thumbnail_path, width, height, kind, ocr_text,
-                        vision_summary, caption_text, status, created_at, updated_at
+                        ocr_status, ocr_error, vision_summary, vision_error, caption_text,
+                        status, created_at, updated_at
                     )
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         image["id"],
@@ -652,7 +666,10 @@ class MetadataStore:
                         int(image.get("height", 0) or 0),
                         image.get("kind", "image"),
                         image.get("ocr_text", ""),
+                        image.get("ocr_status", ""),
+                        image.get("ocr_error", ""),
                         image.get("vision_summary", ""),
+                        image.get("vision_error", ""),
                         image.get("caption_text", ""),
                         image.get("status", "stored"),
                         now,

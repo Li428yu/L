@@ -48,6 +48,9 @@ class ExtractedImage:
     vision_summary: str
     caption_text: str
     status: str
+    ocr_status: str = ""
+    ocr_error: str = ""
+    vision_error: str = ""
     bbox_json_override: str = ""
 
     @property
@@ -78,10 +81,20 @@ class ExtractedImage:
             "height": self.height,
             "kind": self.kind,
             "ocr_text": self.ocr_text,
+            "ocr_status": self.ocr_status,
+            "ocr_error": self.ocr_error,
             "vision_summary": self.vision_summary,
             "caption_text": self.caption_text,
             "status": self.status,
+            "vision_error": self.vision_error,
         }
+
+
+@dataclass(frozen=True)
+class OCRResult:
+    text: str
+    status: str
+    error: str = ""
 
 
 def extract_pdf_images(
@@ -94,7 +107,7 @@ def extract_pdf_images(
 ) -> list[ExtractedImage]:
     output_dir.mkdir(parents=True, exist_ok=True)
     images: list[ExtractedImage] = []
-    ocr_cache: dict[str, str] = {}
+    ocr_cache: dict[str, OCRResult] = {}
     page_heights: dict[int, float] = {}
     image_counter = 0
 
@@ -120,14 +133,16 @@ def extract_pdf_images(
                     image_path.write_bytes(rendered)
 
                 caption_text = _caption_near_bbox(blocks, bbox)
-                should_ocr = len(ocr_cache) < max_ocr_images and _should_ocr_image(bbox, page.rect, caption_text)
-                if image_hash in ocr_cache:
-                    ocr_text = ocr_cache[image_hash]
-                elif should_ocr:
-                    ocr_text = _ocr_image(image_path)
-                    ocr_cache[image_hash] = ocr_text
-                else:
-                    ocr_text = ""
+                ocr_result = _ocr_pdf_image_with_status(
+                    image_hash=image_hash,
+                    image_path=image_path,
+                    bbox=bbox,
+                    page_rect=page.rect,
+                    caption_text=caption_text,
+                    max_ocr_images=max_ocr_images,
+                    ocr_cache=ocr_cache,
+                )
+                ocr_text = ocr_result.text
 
                 width = int(abs(bbox[2] - bbox[0]))
                 height = int(abs(bbox[3] - bbox[1]))
@@ -152,6 +167,8 @@ def extract_pdf_images(
                     height=height,
                     kind=kind,
                     ocr_text=ocr_text,
+                    ocr_status=ocr_result.status,
+                    ocr_error=ocr_result.error,
                     vision_summary=vision_summary,
                     caption_text=caption_text,
                     status=status,
@@ -175,7 +192,7 @@ def extract_docx_images(
 ) -> list[ExtractedImage]:
     output_dir.mkdir(parents=True, exist_ok=True)
     images: list[ExtractedImage] = []
-    ocr_cache: dict[str, str] = {}
+    ocr_cache: dict[str, OCRResult] = {}
     image_counter = 0
 
     with zipfile.ZipFile(docx_path) as package:
@@ -214,17 +231,16 @@ def extract_docx_images(
                         image_path = final_path
 
                     caption_text = _caption_near_docx_record(records, record_index)
-                    if image_hash in ocr_cache:
-                        ocr_text = ocr_cache[image_hash]
-                    elif len(ocr_cache) < max_ocr_images and _should_ocr_docx_image(
+                    ocr_result = _ocr_docx_image_with_status(
+                        image_hash=image_hash,
+                        image_path=image_path,
                         width=width,
                         height=height,
                         caption_text=caption_text,
-                    ):
-                        ocr_text = _ocr_image(image_path)
-                        ocr_cache[image_hash] = ocr_text
-                    else:
-                        ocr_text = ""
+                        max_ocr_images=max_ocr_images,
+                        ocr_cache=ocr_cache,
+                    )
+                    ocr_text = ocr_result.text
 
                     kind = _classify_image(caption_text=caption_text, ocr_text=ocr_text)
                     vision_summary = _fallback_vision_summary(
@@ -257,6 +273,8 @@ def extract_docx_images(
                         height=height,
                         kind=kind,
                         ocr_text=ocr_text,
+                        ocr_status=ocr_result.status,
+                        ocr_error=ocr_result.error,
                         vision_summary=vision_summary,
                         caption_text=caption_text,
                         status=status,
@@ -481,25 +499,59 @@ def enrich_images_with_vision(
     analyzed = 0
     for image in images:
         if analyzed >= max_images:
-            break
+            if _should_analyze_image_with_vision(image):
+                image.status = "vision_skipped"
+                image.vision_error = "max_images_limit"
+            continue
         if not _should_analyze_image_with_vision(image):
+            image.status = "vision_skipped"
+            image.vision_error = "not_selected_by_policy"
             continue
         path = Path(image.image_path)
         if not path.exists():
+            image.status = "vision_failed"
+            image.vision_error = "image_file_missing"
             continue
         prompt = _vision_prompt_for_image(image)
         try:
             summary = analyze_image(path, prompt)
-        except Exception:
+        except Exception as exc:
+            image.status = "vision_failed"
+            image.vision_error = _vision_error_summary(exc)
             continue
         summary = _clean_vision_summary(summary)
         if not summary:
+            image.status = "vision_failed"
+            image.vision_error = "empty_vision_summary"
             continue
         image.vision_summary = summary
         image.status = "vision_ready"
+        image.vision_error = ""
         image.kind = _classify_image(caption_text=image.caption_text, ocr_text=f"{image.ocr_text} {summary}")
         analyzed += 1
     return images
+
+
+def vision_status_counts(images: list[ExtractedImage]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for image in images:
+        status = image.status or "unknown"
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def ocr_status_counts(images: list[ExtractedImage]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for image in images:
+        status = image.ocr_status or ("ocr_ready" if image.ocr_text.strip() else "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _vision_error_summary(exc: Exception) -> str:
+    message = str(exc).strip() or exc.__class__.__name__
+    message = re.sub(r"\s+", " ", message)
+    return f"{exc.__class__.__name__}: {message}"[:300]
 
 
 def _safe_bbox(value: Any) -> tuple[float, float, float, float] | None:
@@ -528,19 +580,14 @@ def _should_analyze_image_with_vision(image: ExtractedImage) -> bool:
 
 def _vision_prompt_for_image(image: ExtractedImage) -> str:
     return f"""
-请观察这张论文中的图片，输出简洁中文结构化说明。只基于图片本身、题注和 OCR，不要猜测论文外的信息。
+请基于图片、题注和 OCR 输出简洁中文说明，不猜测图外信息。
 
-已知上下文：
-- 页码：{image.page_start}-{image.page_end}
-- 初步类型：{image.kind}
-- 题注：{image.caption_text or "无"}
-- OCR：{image.ocr_text or "无"}
+页码：{image.page_start}-{image.page_end}
+类型：{image.kind}
+题注：{image.caption_text or "无"}
+OCR：{image.ocr_text or "无"}
 
-请包含：
-1. 图片实际内容是什么。
-2. 如果是图表，说明坐标轴/表头/变量、主要趋势或差异。
-3. 这张图最可能支持的论文事实。
-4. 如果图片文字很少或看不清，请明确说不确定。
+输出三点：实际内容；图表的轴/表头/变量和主要趋势；可支持的论文事实。不清楚就写不确定。
 """.strip()
 
 
@@ -613,20 +660,106 @@ def _should_ocr_image(
     return bool(caption_text) or area_ratio >= 0.08
 
 
-def _ocr_image(image_path: Path) -> str:
+def _ocr_pdf_image_with_status(
+    *,
+    image_hash: str,
+    image_path: Path,
+    bbox: tuple[float, float, float, float],
+    page_rect: fitz.Rect,
+    caption_text: str,
+    max_ocr_images: int,
+    ocr_cache: dict[str, OCRResult],
+) -> OCRResult:
+    if image_hash in ocr_cache:
+        return ocr_cache[image_hash]
+    if not _should_ocr_image(bbox, page_rect, caption_text):
+        return OCRResult(text="", status="ocr_skipped", error="not_selected_by_policy")
+    if len(ocr_cache) >= max_ocr_images:
+        return OCRResult(text="", status="ocr_skipped", error="max_images_limit")
+    result = _ocr_image_with_status(image_path)
+    ocr_cache[image_hash] = result
+    return result
+
+
+def _ocr_docx_image_with_status(
+    *,
+    image_hash: str,
+    image_path: Path,
+    width: int,
+    height: int,
+    caption_text: str,
+    max_ocr_images: int,
+    ocr_cache: dict[str, OCRResult],
+) -> OCRResult:
+    if image_hash in ocr_cache:
+        return ocr_cache[image_hash]
+    if not _should_ocr_docx_image(width=width, height=height, caption_text=caption_text):
+        return OCRResult(text="", status="ocr_skipped", error="not_selected_by_policy")
+    if len(ocr_cache) >= max_ocr_images:
+        return OCRResult(text="", status="ocr_skipped", error="max_images_limit")
+    result = _ocr_image_with_status(image_path)
+    ocr_cache[image_hash] = result
+    return result
+
+
+def _ocr_image_with_status(image_path: Path) -> OCRResult:
     try:
         from PIL import Image
         import pytesseract
-    except Exception:
-        return ""
+    except Exception as exc:
+        return OCRResult(text="", status="ocr_failed", error=_ocr_error_summary(exc))
+    first_error: Exception | None = None
     try:
-        text = pytesseract.image_to_string(Image.open(image_path), lang="chi_sim+eng")
-    except Exception:
+        with Image.open(image_path) as image:
+            text = pytesseract.image_to_string(image, lang="chi_sim+eng")
+    except Exception as exc:
+        first_error = exc
         try:
-            text = pytesseract.image_to_string(Image.open(image_path), lang="eng")
-        except Exception:
-            return ""
-    return " ".join(text.split())[:3000]
+            with Image.open(image_path) as image:
+                text = pytesseract.image_to_string(image, lang="eng")
+        except Exception as fallback_exc:
+            return OCRResult(
+                text="",
+                status="ocr_failed",
+                error=_ocr_error_summary(fallback_exc, first_error=first_error),
+            )
+    text = " ".join(str(text).split())[:3000]
+    if not text:
+        return OCRResult(text="", status="ocr_empty", error="empty_ocr_text")
+    return OCRResult(text=text, status="ocr_ready", error="")
+
+
+def _ocr_image(image_path: Path) -> str:
+    return _ocr_image_with_status(image_path).text
+
+
+def _ocr_error_summary(exc: Exception, *, first_error: Exception | None = None) -> str:
+    message = str(exc).strip() or exc.__class__.__name__
+    message = re.sub(r"\s+", " ", message)
+    if first_error is not None:
+        first_message = str(first_error).strip() or first_error.__class__.__name__
+        first_message = re.sub(r"\s+", " ", first_message)
+        message = f"primary={first_error.__class__.__name__}: {first_message}; fallback={exc.__class__.__name__}: {message}"
+    else:
+        message = f"{exc.__class__.__name__}: {message}"
+    return message[:300]
+
+
+def _combine_ocr_status(images: list[ExtractedImage]) -> str:
+    if any(image.ocr_text.strip() for image in images):
+        return "ocr_ready"
+    statuses = [image.ocr_status for image in images if image.ocr_status]
+    if not statuses:
+        return ""
+    for status in ["ocr_failed", "ocr_empty", "ocr_skipped", "ocr_ready"]:
+        if status in statuses:
+            return status
+    return statuses[0]
+
+
+def _combine_ocr_error(images: list[ExtractedImage]) -> str:
+    errors = [image.ocr_error for image in images if image.ocr_error]
+    return "; ".join(dict.fromkeys(errors))[:300]
 
 
 def _make_thumbnail(image_path: Path) -> str:
@@ -729,6 +862,8 @@ def _cross_page_image_records(
                     height=current.height + following.height,
                     kind="cross_page_image",
                     ocr_text=ocr,
+                    ocr_status=_combine_ocr_status([current, following]),
+                    ocr_error=_combine_ocr_error([current, following]),
                     vision_summary=f"Possible cross-page image spanning pages {current.page_start}-{following.page_end}.",
                     caption_text=caption,
                     status=status,

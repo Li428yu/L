@@ -1,0 +1,47 @@
+{
+  "default_baseline": "pdf_gold_current",
+  "baselines": [
+    {
+      "id": "pdf_gold_current",
+      "label": "当前 PDF gold 基线",
+      "tier": "gold",
+      "status": "active",
+      "suite_path": "current_pdf_eval_set.json",
+      "suite_name": "current_pdf_eval_set",
+      "document_policy": "expected_ready",
+      "description": "当前唯一可作为可信默认成绩的基线。所有 case 都带 expected_chunk_ids，可校验 gold evidence 命中、漏召回和候选阶段召回。"
+    },
+    {
+      "id": "mixed_pdf_docx_paused",
+      "label": "PDF/DOCX 混合集成基线",
+      "tier": "integration",
+      "status": "paused",
+      "suite_path": "current_mixed_pdf_docx_eval_set.json",
+      "suite_name": "current_mixed_pdf_docx",
+      "document_policy": "expected_ready",
+      "pause_reason": "当前本地 ready 文档缺少网络程序设计实验一/实验二 DOCX，对应 case 不能进入可信均分。",
+      "description": "用于恢复 DOCX 文档后验证跨 PDF/DOCX、多文档关系、视觉和拒答能力。"
+    },
+    {
+      "id": "network_docx_paused",
+      "label": "网络程序设计 DOCX 基线",
+      "tier": "domain",
+      "status": "paused",
+      "suite_path": "current_network_programming_eval_set.json",
+      "suite_name": "current_network_programming",
+      "document_policy": "expected_ready",
+      "pause_reason": "当前本地 ready 文档缺少网络程序设计实验一/实验二 DOCX。",
+      "description": "仅在两份网络程序设计 DOCX 恢复并重新索引后用于领域专项回归。"
+    },
+    {
+      "id": "sample_smoke",
+      "label": "通用 smoke 测试",
+      "tier": "smoke",
+      "status": "supporting",
+      "suite_path": "sample_eval_set.json",
+      "suite_name": "paper_assistant_regression",
+      "document_policy": "all_ready",
+      "description": "只用于开发阶段快速检查评测通路，不作为真实质量分数。"
+    }
+  ]
+}

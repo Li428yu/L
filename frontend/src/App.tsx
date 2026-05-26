@@ -5,7 +5,6 @@ import remarkGfm from "remark-gfm";
 import {
   askPaperStream,
   deleteConversation,
-  deleteDocument,
   documentFileUrl,
   evidenceImageUrl,
   getConversation,
@@ -35,11 +34,13 @@ interface ConversationDraft {
   messages: ChatMessage[];
   activeEvidence: EvidenceItem | null;
   trace: RagTrace | null;
+  documentIds: string[];
 }
 
 interface PendingUpload {
   id: string;
   name: string;
+  conversationId: string;
 }
 
 interface ConversationContextMenu {
@@ -116,7 +117,8 @@ function newConversation(): ConversationDraft {
     conversationId: null,
     messages: [],
     activeEvidence: null,
-    trace: null
+    trace: null,
+    documentIds: []
   };
 }
 
@@ -129,6 +131,13 @@ function conversationFromDetail(detail: ConversationDetail): ConversationDraft {
     memory_used: message.role === "assistant" ? detail.memory_used : undefined
   }));
   const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+  const documentIds = Array.from(
+    new Set(
+      messages.flatMap((message) =>
+        (message.evidence || []).map((item) => item.document_id).filter(Boolean)
+      )
+    )
+  );
   return {
     id: detail.conversation.id,
     title: detail.conversation.title || "历史对话",
@@ -136,7 +145,8 @@ function conversationFromDetail(detail: ConversationDetail): ConversationDraft {
     conversationId: detail.conversation.id,
     messages,
     activeEvidence: latestAssistant?.evidence?.[0] ?? null,
-    trace: null
+    trace: null,
+    documentIds
   };
 }
 
@@ -156,26 +166,33 @@ function App() {
   const [notice, setNotice] = useState("");
   const [rightPanelTab, setRightPanelTab] = useState<"evidence" | "teaching">("evidence");
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
-  const [deletingDocumentIds, setDeletingDocumentIds] = useState<string[]>([]);
   const [columnWidths, setColumnWidths] = useState({ left: 280, right: 420 });
   const [conversationMenu, setConversationMenu] = useState<ConversationContextMenu | null>(null);
-
-  const readyDocuments = documents.filter((document) => document.status === "ready");
-  const preparingDocuments = documents.filter(
-    (document) => document.status === "queued" || document.status === "processing"
-  );
-  const failedDocuments = documents.filter((document) => document.status === "failed");
-  const taskStillRunning = Boolean(task && (task.status === "queued" || task.status === "running"));
-  const canAsk =
-    readyDocuments.length > 0 &&
-    preparingDocuments.length === 0 &&
-    pendingUploads.length === 0 &&
-    !taskStillRunning;
 
   const activeConversation = useMemo(() => {
     const fallback = conversations[0];
     return conversations.find((item) => item.id === activeConversationId) || fallback;
   }, [activeConversationId, conversations]);
+
+  const activeDocumentIds = activeConversation?.documentIds || [];
+  const activeDocumentIdSet = useMemo(() => new Set(activeDocumentIds), [activeDocumentIds]);
+  const activeDocuments = documents.filter((document) => activeDocumentIdSet.has(document.id));
+  const activePendingUploads = pendingUploads.filter((upload) => upload.conversationId === activeConversation.id);
+  const readyDocuments = activeDocuments.filter((document) => document.status === "ready");
+  const preparingDocuments = activeDocuments.filter(
+    (document) => document.status === "queued" || document.status === "processing"
+  );
+  const failedDocuments = activeDocuments.filter((document) => document.status === "failed");
+  const taskStillRunning = Boolean(
+    task &&
+      (task.status === "queued" || task.status === "running") &&
+      (!task.document_id || activeDocumentIdSet.has(task.document_id))
+  );
+  const canAsk =
+    readyDocuments.length > 0 &&
+    preparingDocuments.length === 0 &&
+    activePendingUploads.length === 0 &&
+    !taskStillRunning;
 
   useEffect(() => {
     setActiveConversationId((current) => current || conversations[0].id);
@@ -277,6 +294,33 @@ function App() {
     );
   }
 
+  function attachDocumentToConversation(conversationId: string, documentId: string) {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              documentIds: Array.from(new Set([...conversation.documentIds, documentId])),
+              updatedAt: new Date().toISOString()
+            }
+          : conversation
+      )
+    );
+  }
+
+  function detachDocumentFromActiveConversation(documentId: string) {
+    updateActiveConversation({
+      documentIds: activeConversation.documentIds.filter((id) => id !== documentId),
+      activeEvidence:
+        activeConversation.activeEvidence?.document_id === documentId
+          ? null
+          : activeConversation.activeEvidence
+    });
+    if (task?.document_id === documentId) {
+      setTask(null);
+    }
+  }
+
   async function loadConversationHistory() {
     try {
       const summaries = await listConversations();
@@ -321,16 +365,23 @@ function App() {
     if (files.length === 0) {
       return;
     }
+    const targetConversationId = activeConversation.id;
     setNotice("");
     const uploads = files.map((file) => ({
       id: crypto.randomUUID(),
-      name: file.name
+      name: file.name,
+      conversationId: targetConversationId
     }));
     setPendingUploads((current) => [...current, ...uploads]);
 
     for (const [index, file] of files.entries()) {
       try {
         const response = await uploadDocument(file);
+        setDocuments((current) => {
+          const withoutUploadedDocument = current.filter((item) => item.id !== response.document.id);
+          return [...withoutUploadedDocument, response.document];
+        });
+        attachDocumentToConversation(targetConversationId, response.document.id);
         setTask(response.task);
         setNotice(`已收到《${response.document.file_name}》。等小圆圈消失后，就可以直接提问。`);
         refreshDocuments();
@@ -344,30 +395,17 @@ function App() {
     refreshDocuments();
   }
 
-  async function handleDeleteDocument(document: DocumentInfo) {
-    const confirmed = window.confirm(`删除《${document.file_name}》后，它不会再参与后续回答，确定删除吗？`);
+  function handleDetachDocument(document: DocumentInfo) {
+    const confirmed = window.confirm(
+      `从当前对话移除《${document.file_name}》吗？\n\n原文档和历史记录不会删除，切回相关历史对话时仍可查看。`
+    );
     if (!confirmed) {
       return;
     }
 
     setNotice("");
-    setDeletingDocumentIds((current) => [...current, document.id]);
-    try {
-      await deleteDocument(document.id);
-      setDocuments((current) => current.filter((item) => item.id !== document.id));
-      if (task?.document_id === document.id) {
-        setTask(null);
-      }
-      if (activeConversation.activeEvidence?.document_id === document.id) {
-        updateActiveConversation({ activeEvidence: null });
-      }
-      setNotice(`已删除《${document.file_name}》，后续回答不会再使用它。`);
-    } catch (error) {
-      setNotice(error instanceof Error ? toFriendlyError(error.message) : "删除失败，请稍后再试。");
-      refreshDocuments();
-    } finally {
-      setDeletingDocumentIds((current) => current.filter((id) => id !== document.id));
-    }
+    detachDocumentFromActiveConversation(document.id);
+    setNotice(`已从当前对话移除《${document.file_name}》，历史记录和原文档仍保留。`);
   }
 
   function applyModelPreset(presetId: string) {
@@ -394,7 +432,7 @@ function App() {
       setNotice("先输入一个问题，我再帮你读文档。");
       return;
     }
-    if (pendingUploads.length > 0 || preparingDocuments.length > 0 || taskStillRunning) {
+    if (activePendingUploads.length > 0 || preparingDocuments.length > 0 || taskStillRunning) {
       setNotice("文档还在上传或准备中，等小圆圈消失后再提问。");
       return;
     }
@@ -409,6 +447,7 @@ function App() {
 
     setBusy(true);
     setNotice("");
+    const requestDocumentIds = readyDocuments.map((document) => document.id);
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -451,7 +490,7 @@ function App() {
         {
           question: cleanQuestion,
           conversation_id: activeConversation.conversationId,
-          document_ids: readyDocuments.map((document) => document.id),
+          document_ids: requestDocumentIds,
           model_preset: modelPreset,
           chat_model: chatModel || undefined,
           embedding_model: embeddingModel || undefined,
@@ -481,6 +520,7 @@ function App() {
                 conversationId: response.conversation_id,
                 activeEvidence: response.evidence[0] ?? null,
                 trace: response.rag_trace,
+                documentIds: Array.from(new Set([...conversation.documentIds, ...requestDocumentIds])),
                 updatedAt: new Date().toISOString(),
                 messages: conversation.messages.map((message) =>
                   message.id === assistantId
@@ -514,6 +554,8 @@ function App() {
     setActiveConversationId(draft.id);
     setQuestion("");
     setConversationMenu(null);
+    setTask(null);
+    setNotice("已开启新对话，请上传本轮要阅读的文档。历史记录里的文档不会被删除。");
   }
 
   async function handleDeleteConversation(conversation: ConversationDraft) {
@@ -597,7 +639,7 @@ function App() {
 
   function startColumnResize(side: "left" | "right") {
     const startWidths = { ...columnWidths };
-    const centerMinWidth = 460;
+    const centerMinWidth = 360;
     const leftMinWidth = 180;
     const rightMinWidth = 320;
     const handleWidth = 16;
@@ -769,13 +811,13 @@ function App() {
 
         <footer className="composer">
           <div className="attachment-tray">
-            {pendingUploads.map((upload) => (
+            {activePendingUploads.map((upload) => (
               <span className="uploading-chip" key={upload.id}>
                 <span className="spinner" />
                 正在上传：{upload.name}
               </span>
             ))}
-            {taskStillRunning && pendingUploads.length === 0 && preparingDocuments.length === 0 && (
+            {taskStillRunning && activePendingUploads.length === 0 && preparingDocuments.length === 0 && (
               <span className="uploading-chip">
                 <span className="spinner" />
                 文档准备中
@@ -784,21 +826,22 @@ function App() {
             {readyDocuments.length > 0 && (
               <span className="attachment-hint">上传成功的文档都会参与回答</span>
             )}
-            {documents.length ? (
-              documents.map((document) => (
-                <span key={document.id} className={`attachment-chip ${document.status}`}>
+            {activeDocuments.length ? (
+              activeDocuments.map((document) => (
+                <span key={document.id} className={`attachment-chip ${document.status}`} title={document.file_name}>
                   {(document.status === "queued" || document.status === "processing") && (
                     <span className="spinner" />
                   )}
-                  {document.file_name}
-                  {document.status !== "ready" ? ` · ${humanDocumentStatus(document.status)}` : ""}
+                  <span className="attachment-name">
+                    {document.file_name}
+                    {document.status !== "ready" ? ` · ${humanDocumentStatus(document.status)}` : ""}
+                  </span>
                   <button
                     className="delete-chip"
                     type="button"
-                    aria-label={`删除 ${document.file_name}`}
-                    title="删除这篇文档"
-                    disabled={deletingDocumentIds.includes(document.id)}
-                    onClick={() => handleDeleteDocument(document)}
+                    aria-label={`从当前对话移除 ${document.file_name}`}
+                    title="从当前对话移除"
+                    onClick={() => handleDetachDocument(document)}
                   >
                     ×
                   </button>
@@ -871,7 +914,7 @@ function App() {
           <EvidenceViewer evidence={activeConversation.activeEvidence} documents={documents} />
         ) : (
           <TeachingPanel
-            documents={documents}
+            documents={activeDocuments}
             runtime={latestRuntime}
             trace={latestTrace}
             latestQuestion={latestUserQuestion}
@@ -891,13 +934,32 @@ function EvidenceViewer({
   documents: DocumentInfo[];
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<{
+    src: string;
+    title: string;
+    caption: string;
+  } | null>(null);
   const evidenceKey = evidence
     ? `${evidence.document_id}:${evidence.chunk_id}:${evidence.page}:${evidence.image_id || ""}`
     : "";
 
   useEffect(() => {
     setPreviewOpen(false);
+    setExpandedImage(null);
   }, [evidenceKey]);
+
+  useEffect(() => {
+    if (!expandedImage) {
+      return;
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setExpandedImage(null);
+      }
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [expandedImage]);
 
   if (!evidence) {
     return (
@@ -915,6 +977,7 @@ function EvidenceViewer({
   const relatedImages = (evidence.related_images || []).filter((image) => image.id !== evidence.image_id);
 
   return (
+    <>
     <section className="source-card">
       <div className="source-head">
         <span>{evidenceLabel(evidence)}</span>
@@ -928,26 +991,57 @@ function EvidenceViewer({
       <mark>{coreEvidenceText(evidence)}</mark>
       {isImageEvidence && imageUrl && (
         <figure className="evidence-image-preview">
-          <img src={imageUrl} alt={`Evidence ${evidence.citation_id}`} loading="lazy" />
+          <button
+            className="image-zoom-trigger"
+            type="button"
+            onClick={() =>
+              setExpandedImage({
+                src: imageUrl,
+                title: evidenceLabel(evidence),
+                caption: `${evidence.chunk_type || "image"} · Page ${evidencePageLabel(evidence)}`
+              })
+            }
+          >
+            <img src={imageUrl} alt={`Evidence ${evidence.citation_id}`} loading="lazy" />
+          </button>
           <figcaption>
             {evidence.chunk_type || "image"} · Page {evidencePageLabel(evidence)}
+            <span>点击图片放大查看</span>
           </figcaption>
         </figure>
       )}
       {relatedImages.length > 0 && (
         <div className="related-evidence-images">
           <p className="evidence-caption">相关图片证据</p>
-          {relatedImages.map((image) => (
-            <figure className="evidence-image-preview" key={image.id}>
-              <img src={evidenceImageUrl(image.document_id, image.id)} alt={`Related image ${image.id}`} loading="lazy" />
-              <figcaption>
-                {image.kind || "image"} · Page {imagePageLabel(image)}
-                {image.caption_text || image.ocr_text || image.vision_summary ? (
-                  <span>{image.caption_text || image.ocr_text || image.vision_summary}</span>
-                ) : null}
-              </figcaption>
-            </figure>
-          ))}
+          {relatedImages.map((image) => {
+            const relatedImageUrl = evidenceImageUrl(image.document_id, image.id);
+            const relatedCaption =
+              image.caption_text || image.ocr_text || image.vision_summary || image.vision_error || image.ocr_error || "";
+            return (
+              <figure className="evidence-image-preview" key={image.id}>
+                <button
+                  className="image-zoom-trigger"
+                  type="button"
+                  onClick={() =>
+                    setExpandedImage({
+                      src: relatedImageUrl,
+                      title: "相关图片证据",
+                      caption: `${image.kind || "image"} · Page ${imagePageLabel(image)}${relatedCaption ? ` · ${relatedCaption}` : ""}`
+                    })
+                  }
+                >
+                  <img src={relatedImageUrl} alt={`Related image ${image.id}`} loading="lazy" />
+                </button>
+                <figcaption>
+                  {image.kind || "image"} · Page {imagePageLabel(image)}
+                  <span>点击图片放大查看</span>
+                  {relatedCaption ? (
+                    <span>{relatedCaption}</span>
+                  ) : null}
+                </figcaption>
+              </figure>
+            );
+          })}
         </div>
       )}
       <details className="source-context-details">
@@ -980,6 +1074,27 @@ function EvidenceViewer({
         />
       )}
     </section>
+    {expandedImage && (
+      <div
+        className="image-lightbox"
+        role="dialog"
+        aria-modal="true"
+        aria-label={expandedImage.title}
+        onClick={() => setExpandedImage(null)}
+      >
+        <div className="image-lightbox-content" onClick={(event) => event.stopPropagation()}>
+          <div className="image-lightbox-head">
+            <strong>{expandedImage.title}</strong>
+            <button type="button" onClick={() => setExpandedImage(null)} aria-label="关闭图片预览">
+              ×
+            </button>
+          </div>
+          <img src={expandedImage.src} alt={expandedImage.title} />
+          {expandedImage.caption && <p>{expandedImage.caption}</p>}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -1175,6 +1290,26 @@ function evidenceQualityLabel(value?: string) {
   return value ? labels[value] || value : "待判断";
 }
 
+function candidateQualityLabel(value?: string) {
+  const labels: Record<string, string> = {
+    strong: "强证据",
+    medium: "中等证据",
+    weak: "弱证据",
+    noise: "疑似噪声"
+  };
+  return value ? labels[value] || value : "未知质量";
+}
+
+function selectionStatusLabel(value?: string) {
+  const labels: Record<string, string> = {
+    selected_by_retrieval_filter: "召回后保留",
+    selected_for_answer: "进入回答证据",
+    filtered_out: "召回后过滤",
+    rejected_by_evidence_judge: "裁判拒绝"
+  };
+  return value ? labels[value] || value : "未知状态";
+}
+
 function TeachingPanel({
   documents,
   runtime,
@@ -1210,6 +1345,24 @@ function TeachingPanel({
         <strong>{trace?.diagnosis || "等待一次真实问答后显示诊断。"}</strong>
       </div>
 
+      {trace?.evidence_coverage?.should_refuse ? (
+        <div className="question-card warning-card">
+          <span>证据覆盖门禁</span>
+          <strong>{trace.evidence_coverage.reason || "证据覆盖不足，本轮已拒绝硬答。"}</strong>
+          {trace.evidence_coverage.reason_code && <small>{trace.evidence_coverage.reason_code}</small>}
+        </div>
+      ) : null}
+
+      {trace?.embedding_used_fallback ? (
+        <div className="question-card warning-card">
+          <span>备用检索</span>
+          <strong>
+            本次 embedding 使用{trace.embedding_provider || "本地备用检索"}，召回质量可能低于在线 embedding。
+          </strong>
+          {trace.embedding_fallback_reason && <small>{trace.embedding_fallback_reason}</small>}
+        </div>
+      ) : null}
+
       {trace?.visual_ocr_warnings?.length ? (
         <div className="question-card">
           <span>图片/OCR 提醒</span>
@@ -1239,6 +1392,10 @@ function TeachingPanel({
         <div>
           <span>降级状态</span>
           <strong>{trace?.fallback_used ? "已降级" : trace ? "未降级" : "待运行"}</strong>
+        </div>
+        <div>
+          <span>Embedding</span>
+          <strong>{trace?.embedding_provider || trace?.embedding_requested_model || "待检索"}</strong>
         </div>
       </div>
 
@@ -1308,6 +1465,10 @@ function TeachingPanel({
             <strong>{trace?.ranking_method || "待检索"}</strong>
           </div>
           <div>
+            <span>备用索引文档</span>
+            <strong>{trace?.embedding_document_fallback_count ?? "待检索"}</strong>
+          </div>
+          <div>
             <span>筛选文档</span>
             <strong>{filteredDocumentCount || "全部/待定"}</strong>
           </div>
@@ -1330,9 +1491,14 @@ function TeachingPanel({
                 <small className="hit-reason">命中原因：{item.reason}</small>
                 <div className="debug-tags">
                   <span>{item.selected_by}</span>
+                  {item.quality_label ? <span>{candidateQualityLabel(item.quality_label)}</span> : null}
+                  {item.selection_status ? <span>{selectionStatusLabel(item.selection_status)}</span> : null}
                   <span>{item.used_in_answer ? "进入回答" : "未直接引用"}</span>
                   <span>{item.used_in_prompt ? "进入 prompt" : "未进 prompt"}</span>
                 </div>
+                {item.quality_reasons?.length ? (
+                  <small>质量标签依据：{item.quality_reasons.slice(0, 4).join("；")}</small>
+                ) : null}
                 {item.matched_keywords.length > 0 && (
                   <small>命中关键词：{item.matched_keywords.join("、")}</small>
                 )}
@@ -1346,6 +1512,32 @@ function TeachingPanel({
             <p>完成一次提问后，这里会显示本轮检索到的证据和 score。</p>
           )}
         </div>
+        {trace?.evidence_quality_trace?.length ? (
+          <div className="evidence-debug-list compact">
+            {trace.evidence_quality_trace.slice(0, 12).map((item) => (
+              <article key={`${item.candidate_rank}-${item.chunk_id}`}>
+                <strong>
+                  #{item.candidate_rank} · chunk {item.chunk_id}
+                </strong>
+                <span>{selectionStatusLabel(item.selection_status)}</span>
+                <span>{candidateQualityLabel(item.quality_label)}</span>
+                <span>score：{formatScore(item.score)}</span>
+                <span>相关度：{formatScore(item.relevance_score)}</span>
+                <span>可读性：{formatScore(item.readability_score)}</span>
+                <span>来源：{scoreSourceLabel(item.score_source)}</span>
+                {item.rejection_reason ? <small className="hit-reason">过滤/拒绝原因：{item.rejection_reason}</small> : null}
+                {item.judge_verdict ? <small>裁判结果：{item.judge_verdict}</small> : null}
+                {item.quality_reasons?.length ? (
+                  <small>质量标签依据：{item.quality_reasons.slice(0, 5).join("；")}</small>
+                ) : null}
+                <details className="debug-evidence-details">
+                  <summary>查看候选片段</summary>
+                  <p>{maskSensitiveText(item.quote || "")}</p>
+                </details>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </details>
 
       <details className="teaching-section">

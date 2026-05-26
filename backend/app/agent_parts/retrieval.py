@@ -8,8 +8,10 @@ from backend.app.agent_parts.state import PaperAgentState
 from backend.app.agent_parts.retrieval_engines import AgentRetrievalEngineMixin
 from backend.app.agent_parts.retrieval_evidence import AgentRetrievalEvidenceMixin
 from backend.app.agent_parts.retrieval_filters import AgentRetrievalFilterMixin
+from backend.app.agent_parts.retrieval_quality import AgentRetrievalQualityMixin
 from backend.app.agent_parts.retrieval_rules import AgentRetrievalRuleMixin
 from backend.app.agent_parts.retrieval_scoring import AgentRetrievalScoringMixin
+from backend.app.llm_clients import LOCAL_FALLBACK_EMBEDDING_PROVIDER
 from backend.app.models import EvidenceItem, RuntimeStep
 
 
@@ -17,6 +19,7 @@ class AgentRetrievalMixin(
     AgentRetrievalEngineMixin,
     AgentRetrievalEvidenceMixin,
     AgentRetrievalScoringMixin,
+    AgentRetrievalQualityMixin,
     AgentRetrievalRuleMixin,
     AgentRetrievalFilterMixin,
 ):
@@ -32,7 +35,7 @@ class AgentRetrievalMixin(
             document_ids=requested_document_ids,
         )
         strategy = state.get("retrieval_strategy") or "hybrid_soft"
-        evidence, retrieval_pipeline, ranking_method = self._hybrid_evidence(
+        candidate_evidence, retrieval_pipeline, ranking_method, embedding_trace = self._hybrid_evidence(
             question=state["question"],
             soft_intent=state.get("soft_intent", {}),
             document_ids=document_ids,
@@ -42,8 +45,15 @@ class AgentRetrievalMixin(
         )
         evidence = self._filter_evidence_for_question(
             state["question"],
-            evidence,
+            candidate_evidence,
             top_k=state["top_k"],
+        )
+        evidence, evidence_quality_trace = self._annotate_retrieval_quality(
+            question=state["question"],
+            candidates=candidate_evidence,
+            selected=evidence,
+            top_k=state["top_k"],
+            retrieval_strategy=strategy,
         )
         multi_document_cards = self._build_multi_document_cards(
             question=state["question"],
@@ -79,6 +89,13 @@ class AgentRetrievalMixin(
                 ),
             )
         )
+        runtime_steps.append(
+            RuntimeStep(
+                node="evidence_quality_trace",
+                title="标记证据质量",
+                detail=self._quality_trace_summary(evidence_quality_trace),
+            )
+        )
         if len(document_ids) > 1:
             covered_count = int(multi_document_coverage.get("covered_document_count", 0) or 0)
             requested_count = int(multi_document_coverage.get("requested_document_count", len(document_ids)) or 0)
@@ -101,6 +118,9 @@ class AgentRetrievalMixin(
             "retrieval_strategy": strategy,
             "retrieval_pipeline": retrieval_pipeline,
             "ranking_method": ranking_method,
+            "embedding_trace": embedding_trace,
+            "evidence_quality_trace": evidence_quality_trace,
+            "fallback_used": bool(state.get("fallback_used", False)) or bool(embedding_trace.get("embedding_used_fallback")),
             "retrieval_document_ids": document_ids,
             "requested_document_ids": requested_document_ids,
             "multi_document_cards": multi_document_cards,
@@ -653,6 +673,7 @@ class AgentRetrievalMixin(
             "retrieval_strategy": "hybrid_retry",
             "soft_intent": soft_intent,
             "evidence": [],
+            "evidence_quality_trace": [],
             "evidence_judgments": [],
             "runtime": [
                 *state.get("runtime", []),
@@ -673,9 +694,19 @@ class AgentRetrievalMixin(
         top_k: int,
         embedding_model: str,
         retrieval_strategy: str,
-    ) -> tuple[list[EvidenceItem], str, str]:
+    ) -> tuple[list[EvidenceItem], str, str, dict[str, Any]]:
+        embedding_events: list[dict[str, Any]] = []
         if not document_ids:
-            return [], "dense_vector + bm25_sparse -> rrf_fusion", "none"
+            return (
+                [],
+                "dense_vector + bm25_sparse -> rrf_fusion",
+                "none",
+                self._build_embedding_trace(
+                    requested_model=embedding_model,
+                    document_ids=document_ids,
+                    query_events=embedding_events,
+                ),
+            )
         if self._should_balance_multi_document_retrieval(
             question=question,
             soft_intent=soft_intent,
@@ -687,11 +718,17 @@ class AgentRetrievalMixin(
                 document_ids=document_ids,
                 top_k=top_k,
                 embedding_model=embedding_model,
+                embedding_events=embedding_events,
             )
             return (
                 self._renumber_evidence(ranked),
                 "per_document_structured + per_document_dense + per_document_bm25 -> balanced_rrf_fusion",
                 "按文献配额的 RRF 融合排序",
+                self._build_embedding_trace(
+                    requested_model=embedding_model,
+                    document_ids=document_ids,
+                    query_events=embedding_events,
+                ),
             )
 
         targeted = self._targeted_evidence_candidates(
@@ -705,6 +742,7 @@ class AgentRetrievalMixin(
             document_ids=document_ids,
             top_k=max(top_k * 8, 24),
             embedding_model=embedding_model,
+            embedding_events=embedding_events,
         )
         sparse_candidates = self._bm25_sparse_evidence(
             question=question,
@@ -734,6 +772,11 @@ class AgentRetrievalMixin(
                 else "dense_vector + bm25_sparse -> rrf_fusion"
             ),
             "RRF 融合排序",
+            self._build_embedding_trace(
+                requested_model=embedding_model,
+                document_ids=document_ids,
+                query_events=embedding_events,
+            ),
         )
 
     def _should_balance_multi_document_retrieval(
@@ -763,6 +806,7 @@ class AgentRetrievalMixin(
         document_ids: list[str],
         top_k: int,
         embedding_model: str,
+        embedding_events: list[dict[str, Any]] | None = None,
     ) -> list[EvidenceItem]:
         per_document_limit = max(2, min(4, top_k))
         candidate_lists: list[list[EvidenceItem]] = []
@@ -782,6 +826,7 @@ class AgentRetrievalMixin(
                 document_ids=scoped_document_ids,
                 top_k=max(top_k * 4, 12),
                 embedding_model=embedding_model,
+                embedding_events=embedding_events,
             )
             sparse_candidates = self._bm25_sparse_evidence(
                 question=question,
@@ -1075,13 +1120,29 @@ class AgentRetrievalMixin(
         normalized = question.lower()
         has_function_intent = any(
             keyword in normalized
-            for keyword in ["核心功能", "功能集合", "functions", "core functions", "core function"]
+            for keyword in ["核心功能", "功能集合", "功能", "functions", "function", "core functions", "core function"]
         )
         has_framework_scope = any(
             keyword in normalized
             for keyword in ["nist", "rmf", "csf", "framework", "框架"]
         )
-        return has_function_intent and has_framework_scope
+        function_names = [
+            "govern",
+            "map",
+            "measure",
+            "manage",
+            "identify",
+            "protect",
+            "detect",
+            "respond",
+            "recover",
+        ]
+        asks_named_function_role = (
+            has_framework_scope
+            and any(term in normalized for term in function_names)
+            and any(keyword in normalized for keyword in ["作用", "角色", "role", "function"])
+        )
+        return has_framework_scope and (has_function_intent or asks_named_function_role)
 
     def _looks_like_trustworthy_characteristics_question(self, question: str) -> bool:
         normalized = question.lower()
@@ -1186,6 +1247,7 @@ class AgentRetrievalMixin(
             "respond",
             "recover",
         ]
+        expected_terms = self._expected_framework_function_terms(question)
         scored: list[tuple[float, int, EvidenceItem]] = []
         position = 0
         for document_id in document_ids:
@@ -1200,6 +1262,8 @@ class AgentRetrievalMixin(
                 ]
                 if len(hits) < 2:
                     continue
+                if expected_terms and not expected_terms.issubset(set(hits)):
+                    continue
 
                 score = 0.72 + min(0.22, len(set(hits)) * 0.04)
                 if any(marker in normalized_text for marker in ["core", "function", "functions", "categories"]):
@@ -1208,7 +1272,7 @@ class AgentRetrievalMixin(
                     score += 0.24
                 chunk_type = str(metadata.get("chunk_type") or "").lower()
                 if any(marker in chunk_type for marker in ["image", "figure", "table"]):
-                    score += 0.08
+                    score += 0.08 if self._question_requires_visual_evidence(question) else -0.16
                 score += self._question_relevance_score(question, f"{metadata.get('paper_name', '')}\n{text}") * 0.25
 
                 item = self._evidence_from_row(
@@ -1284,15 +1348,27 @@ class AgentRetrievalMixin(
         document_ids: list[str],
         top_k: int,
         embedding_model: str,
+        embedding_events: list[dict[str, Any]] | None = None,
     ) -> list[EvidenceItem]:
         try:
             resolved_model = self._resolve_query_embedding_model(
                 requested_model=embedding_model,
                 document_ids=document_ids,
             )
-            query_embedding = self.model_clients.embed_query(question, model=resolved_model)
+            query_embedding = self.model_clients.embed_query_with_info(question, model=resolved_model)
+            if embedding_events is not None:
+                embedding_events.append(
+                    {
+                        "requested_model": embedding_model,
+                        "resolved_model": resolved_model,
+                        "provider": query_embedding.provider,
+                        "used_fallback": query_embedding.used_fallback,
+                        "fallback_reason": query_embedding.fallback_reason,
+                        "document_ids": document_ids,
+                    }
+                )
             return self.vector_store.query(
-                query_embedding=query_embedding,
+                query_embedding=query_embedding.vector,
                 top_k=top_k,
                 document_ids=document_ids,
             )
@@ -1315,15 +1391,68 @@ class AgentRetrievalMixin(
             )
         return boosted
 
+    def _build_embedding_trace(
+        self,
+        *,
+        requested_model: str,
+        document_ids: list[str],
+        query_events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        document_providers: dict[str, str] = {}
+        document_fallback_count = 0
+        for document_id in document_ids:
+            document = self.store.get_document(document_id)
+            provider = str(getattr(document, "embedding_model", "") or "")
+            if provider:
+                document_providers[document_id] = provider
+            if provider == LOCAL_FALLBACK_EMBEDDING_PROVIDER:
+                document_fallback_count += 1
+
+        provider = requested_model
+        fallback_reason = ""
+        query_used_fallback = False
+        if query_events:
+            provider = str(query_events[-1].get("provider") or provider)
+            query_used_fallback = any(bool(event.get("used_fallback")) for event in query_events)
+            reasons = [
+                str(event.get("fallback_reason") or "").strip()
+                for event in query_events
+                if str(event.get("fallback_reason") or "").strip()
+            ]
+            fallback_reason = "; ".join(dict.fromkeys(reasons))[:500]
+
+        if document_fallback_count and not fallback_reason:
+            fallback_reason = "至少一份目标文档使用本地备用检索索引，查询向量同步使用本地备用检索。"
+
+        return {
+            "embedding_requested_model": requested_model,
+            "embedding_provider": provider,
+            "embedding_used_fallback": query_used_fallback or document_fallback_count > 0,
+            "embedding_fallback_reason": fallback_reason,
+            "embedding_document_fallback_count": document_fallback_count,
+            "embedding_document_providers": document_providers,
+        }
+
     def _resolve_query_embedding_model(
         self,
         *,
         requested_model: str,
         document_ids: list[str],
     ) -> str:
+        indexed_models: list[str] = []
         for document_id in document_ids:
             document = self.store.get_document(document_id)
-            if document and document.embedding_model == "本地备用检索":
-                return "本地备用检索"
+            provider = str(getattr(document, "embedding_model", "") or "").strip()
+            if provider:
+                indexed_models.append(provider)
+            if provider == LOCAL_FALLBACK_EMBEDDING_PROVIDER:
+                return LOCAL_FALLBACK_EMBEDDING_PROVIDER
+        unique_models = sorted(set(indexed_models))
+        if len(unique_models) == 1:
+            return unique_models[0]
+        if len(unique_models) > 1:
+            raise RuntimeError(
+                "目标文档使用了不同 embedding 索引，不能在同一次 dense 检索中混用向量空间。"
+            )
         return requested_model
 
