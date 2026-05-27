@@ -229,10 +229,36 @@ class AgentEvidenceCoverageMixin:
     def _evidence_has_ocr_text_signal(self, item: EvidenceItem) -> bool:
         if any(str(getattr(image, "ocr_text", "") or "").strip() for image in item.related_images):
             return True
+        if any(
+            self._visual_summary_has_text_recognition_signal(str(getattr(image, "vision_summary", "") or ""))
+            for image in item.related_images
+        ):
+            return True
         text = str(item.text or "")
         if "OCR:" in text:
             return bool(text.split("OCR:", 1)[1].strip())
+        if self._visual_summary_has_text_recognition_signal(f"{item.quote or ''}\n{text}"):
+            return True
         return "ocr" in (item.chunk_type or "").lower() and bool(text.strip())
+
+    def _visual_summary_has_text_recognition_signal(self, text: str) -> bool:
+        normalized = str(text or "").lower()
+        if len(normalized.strip()) < 12:
+            return False
+        markers = [
+            "文字识别",
+            "文字清晰",
+            "文字均",
+            "可识别",
+            "图片内文字",
+            "文本页面",
+            "说明文本",
+            "产品说明",
+            "ocr",
+            "readable text",
+            "scanned text",
+        ]
+        return any(marker in normalized for marker in markers)
 
     def _call_bool(self, method_name: str, question: str) -> bool:
         method = getattr(self, method_name, None)

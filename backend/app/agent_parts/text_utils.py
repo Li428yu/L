@@ -44,6 +44,79 @@ class AgentTextUtilityMixin:
         sanitized = re.sub(r"(电子邮件|邮箱)\s*[:：]\s*\S+", r"\1：[已隐藏]", sanitized)
         return sanitized
 
+    def _looks_like_visual_question_text(self, question: str) -> bool:
+        normalized = " ".join(question.lower().split())
+        if not normalized:
+            return False
+
+        strong_visual_markers = [
+            "图片",
+            "截图",
+            "运行截图",
+            "图表",
+            "图中",
+            "图里",
+            "图上",
+            "图示",
+            "架构图",
+            "示意图",
+            "视觉证据",
+            "图片证据",
+            "看图",
+            "figure",
+            "fig.",
+            "chart",
+            "diagram",
+            "screenshot",
+            "visual evidence",
+            "image evidence",
+            "what does the image",
+            "what does the figure",
+            "shown in the image",
+            "shown in the figure",
+            "in the image",
+            "in the figure",
+            "from the image",
+            "from the figure",
+        ]
+        if any(marker in normalized for marker in strong_visual_markers):
+            return True
+
+        modality_pair_markers = [
+            "图像-文本",
+            "图像文本",
+            "图像/文本",
+            "图像与文本",
+            "图像和文本",
+            "图文",
+            "image-text",
+            "image text",
+            "image/text",
+            "image and text",
+        ]
+        data_context_markers = [
+            "数据",
+            "数据集",
+            "规模",
+            "训练",
+            "预训练",
+            "对",
+            "dataset",
+            "datasets",
+            "data",
+            "training",
+            "pretraining",
+            "pre-training",
+            "pairs",
+            "pair",
+        ]
+        if any(marker in normalized for marker in modality_pair_markers) and any(
+            marker in normalized for marker in data_context_markers
+        ):
+            return False
+
+        return any(marker in normalized for marker in ["图像", "视觉", "image", "visual"])
+
     def _evidence_page_label(self, item: EvidenceItem) -> str:
         page_start = item.page_start or item.page
         page_end = item.page_end or page_start

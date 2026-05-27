@@ -93,8 +93,6 @@ class Settings:
     vision_api_type: str = os.getenv("VISION_API_TYPE", "openai_chat").strip().lower()
     enable_vision_analysis: bool = _bool_env("ENABLE_VISION_ANALYSIS", False)
     max_vision_images: int = int(os.getenv("MAX_VISION_IMAGES", "40"))
-    enable_llm_judge: bool = _bool_env("ENABLE_LLM_JUDGE", True)
-    judge_model: str = os.getenv("JUDGE_MODEL", os.getenv("LLM_MODEL", "gpt-4.1-mini"))
 
     @property
     def resolved_data_dir(self) -> Path:

@@ -69,7 +69,6 @@ def main() -> None:
         agent=agent,
         document_ids=document_ids,
         observer=observer,
-        enable_judge=not args.no_judge,
         model_preset=args.model_preset,
         chat_model=args.chat_model,
         embedding_model=args.embedding_model,
@@ -78,6 +77,19 @@ def main() -> None:
     )
     result_path = settings.eval_results_dir / f"{run.run_id}.json"
     metadata = baseline_metadata(baseline)
+    case_summaries = [
+        {
+            "case_id": result.case_id,
+            "status": result.result_status,
+            "evidence_count": result.evidence_count,
+            "citation_count": result.citation_count,
+            "valid_citation_count": result.valid_citation_count,
+            "evidence_keyword_hit_rate": result.evidence_keyword_hit_rate,
+            "failure_categories": result.failure_categories,
+            "reasons": result.grading_reasons,
+        }
+        for result in run.results
+    ]
     print(
         json.dumps(
             {
@@ -85,43 +97,21 @@ def main() -> None:
                 "suite_name": run.suite_name,
                 **metadata,
                 "case_count": run.case_count,
+                "pass_count": run.pass_count,
+                "fail_count": run.fail_count,
+                "pass_rate": run.pass_rate,
                 "document_ids": run.document_ids,
                 "result_status_counts": run.result_status_counts,
                 "failure_category_counts": run.failure_category_counts,
-                "grading_summary": run.grading_summary,
                 "evaluation_trustworthy": run.evaluation_trustworthy,
-                "trust_gate_status": run.trust_gate_status,
-                "trust_gate_failures": run.trust_gate_failures,
-                "avg_score": run.avg_score,
-                "avg_judge_score": run.avg_judge_score,
-                "judge_coverage": run.judge_coverage,
                 "retrieval_hit_rate": run.retrieval_hit_rate,
                 "citation_hit_rate": run.citation_hit_rate,
-                "avg_context_precision": run.avg_context_precision,
-                "avg_context_recall": run.avg_context_recall,
-                "gold_chunk_case_count": run.gold_chunk_case_count,
-                "avg_gold_chunk_recall_at_1": run.avg_gold_chunk_recall_at_1,
-                "avg_gold_chunk_recall_at_3": run.avg_gold_chunk_recall_at_3,
-                "avg_gold_chunk_recall_at_5": run.avg_gold_chunk_recall_at_5,
-                "avg_gold_chunk_recall_at_k": run.avg_gold_chunk_recall_at_k,
-                "avg_gold_chunk_candidate_recall_at_k": run.avg_gold_chunk_candidate_recall_at_k,
                 "avg_document_coverage": run.avg_document_coverage,
                 "avg_citation_accuracy": run.avg_citation_accuracy,
-                "avg_image_evidence_hit_rate": run.avg_image_evidence_hit_rate,
-                "avg_visual_evidence_hit_rate": run.avg_visual_evidence_hit_rate,
-                "avg_visual_summary_hit_rate": run.avg_visual_summary_hit_rate,
-                "avg_table_evidence_hit_rate": run.avg_table_evidence_hit_rate,
-                "avg_ocr_evidence_hit_rate": run.avg_ocr_evidence_hit_rate,
-                "avg_ocr_text_hit_rate": run.avg_ocr_text_hit_rate,
-                "avg_claim_hit_rate": run.avg_claim_hit_rate,
-                "avg_forbidden_claim_rate": run.avg_forbidden_claim_rate,
-                "avg_refusal_correctness": run.avg_refusal_correctness,
-                "avg_relation_hit": run.avg_relation_hit,
-                "avg_visual_warning_count": run.avg_visual_warning_count,
                 "embedding_fallback_count": run.embedding_fallback_count,
                 "embedding_fallback_rate": run.embedding_fallback_rate,
-                "segment_metrics": run.segment_metrics,
                 "avg_latency_ms": run.avg_latency_ms,
+                "cases": case_summaries,
                 "result_path": str(result_path),
             },
             ensure_ascii=False,
@@ -149,7 +139,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--case", action="append", help="只运行指定 case_id，可重复传入")
     parser.add_argument("--limit", type=int, default=None, help="只运行前 N 条 case")
-    parser.add_argument("--no-judge", action="store_true", help="关闭 LLM-as-judge，只跑程序化指标")
     parser.add_argument("--model-preset", default=None, help="指定阅读模式，例如 balanced/careful/quick")
     parser.add_argument("--chat-model", default=None, help="覆盖对话模型")
     parser.add_argument("--embedding-model", default=None, help="覆盖 embedding 模型")

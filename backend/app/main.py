@@ -362,7 +362,7 @@ def _stream_event(event_type: str, payload: object) -> str:
     return json.dumps({"type": event_type, "payload": payload}, ensure_ascii=False) + "\n"
 
 
-@app.post("/api/evaluation/run", response_model=EvaluationRun)
+@app.post("/api/evaluation/run", response_model=EvaluationRun, response_model_exclude_defaults=True)
 def run_evaluation(request: EvaluationRunRequest | list[str] = Body(...)) -> EvaluationRun:
     if isinstance(request, list):
         request = EvaluationRunRequest(document_ids=request)
@@ -389,7 +389,6 @@ def run_evaluation(request: EvaluationRunRequest | list[str] = Body(...)) -> Eva
         agent=agent,
         document_ids=document_ids,
         observer=observer,
-        enable_judge=request.enable_judge,
         model_preset=request.model_preset,
         chat_model=request.chat_model,
         embedding_model=request.embedding_model,

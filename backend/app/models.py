@@ -304,21 +304,12 @@ class EvaluationCase(BaseModel):
     id: str
     question: str
     expected_keywords: list[str] = Field(default_factory=list)
-    expected_answer: str = ""
     expected_document: str | None = None
-    expected_page: int | None = None
     expected_documents: list[str] = Field(default_factory=list)
-    expected_pages: list[int] = Field(default_factory=list)
     expected_evidence_keywords: list[str] = Field(default_factory=list)
-    expected_modalities: list[str] = Field(default_factory=list)
-    expected_chunk_ids: list[str] = Field(default_factory=list)
     relation_keywords: list[str] = Field(default_factory=list)
     required_document_count: int | None = None
-    expected_claims: list[str] = Field(default_factory=list)
-    forbidden_claims: list[str] = Field(default_factory=list)
-    expected_relation: str = ""
     expected_refusal: bool | None = None
-    judge_rubric: str = ""
 
 
 class EvaluationRunRequest(BaseModel):
@@ -328,7 +319,6 @@ class EvaluationRunRequest(BaseModel):
     suite_path: str | None = None
     case_ids: list[str] = Field(default_factory=list)
     limit: int | None = None
-    enable_judge: bool | None = None
     model_preset: str | None = None
     chat_model: str | None = None
     embedding_model: str | None = None
@@ -342,41 +332,19 @@ class EvaluationResult(BaseModel):
     error: str | None = None
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     trace_summary: dict[str, Any] = Field(default_factory=dict)
+    evidence_count: int = 0
+    citation_count: int = 0
+    valid_citation_count: int = 0
+    evidence_keyword_hit_rate: float = 1.0
+    evidence_document_hit: bool = True
     retrieval_hit: bool
     citation_hit: bool
     keyword_hit_rate: float
     context_precision: float = 0.0
     context_recall: float = 0.0
-    gold_chunk_count: int = 0
-    gold_chunk_recall_at_1: float = 0.0
-    gold_chunk_recall_at_3: float = 0.0
-    gold_chunk_recall_at_5: float = 0.0
-    gold_chunk_recall_at_k: float = 0.0
-    gold_chunk_hit_ids: list[str] = Field(default_factory=list)
-    gold_chunk_missed_ids: list[str] = Field(default_factory=list)
-    gold_chunk_candidate_recall_at_k: float = 0.0
-    gold_chunk_candidate_hit_ids: list[str] = Field(default_factory=list)
-    gold_chunk_candidate_missed_ids: list[str] = Field(default_factory=list)
     document_coverage: float = 1.0
-    image_evidence_hit: bool = True
-    visual_evidence_hit: bool = True
-    visual_summary_hit: bool = True
-    table_evidence_hit: bool = True
-    ocr_evidence_hit: bool = True
-    ocr_text_hit: bool = True
     citation_accuracy: float = 1.0
-    answer_relevance: float = 0.0
-    faithfulness_proxy: float = 0.0
-    claim_hit_rate: float = 1.0
-    forbidden_claim_rate: float = 0.0
-    refusal_correctness: float = 1.0
-    relation_hit: float = 1.0
-    visual_warning_count: int = 0
     embedding_used_fallback: bool = False
-    judge_used: bool = False
-    judge_score: float = 0.0
-    judge_scores: dict[str, float] = Field(default_factory=dict)
-    judge_reason: str = ""
     score: float = 0.0
     score_breakdown: dict[str, float] = Field(default_factory=dict)
     result_status: str = ""
@@ -392,46 +360,24 @@ class EvaluationRun(BaseModel):
     created_at: str = ""
     document_ids: list[str] = Field(default_factory=list)
     case_count: int = 0
-    judge_enabled: bool = False
-    score_version: str = "rag-eval-v1"
+    pass_count: int = 0
+    fail_count: int = 0
+    pass_rate: float = 0.0
+    score_version: str = "smoke-evidence-v1"
     results: list[EvaluationResult]
     retrieval_hit_rate: float
     citation_hit_rate: float
     avg_keyword_hit_rate: float
     avg_context_precision: float = 0.0
     avg_context_recall: float = 0.0
-    gold_chunk_case_count: int = 0
-    avg_gold_chunk_recall_at_1: float = 0.0
-    avg_gold_chunk_recall_at_3: float = 0.0
-    avg_gold_chunk_recall_at_5: float = 0.0
-    avg_gold_chunk_recall_at_k: float = 0.0
-    avg_gold_chunk_candidate_recall_at_k: float = 0.0
     avg_document_coverage: float = 1.0
-    avg_image_evidence_hit_rate: float = 1.0
-    avg_visual_evidence_hit_rate: float = 1.0
-    avg_visual_summary_hit_rate: float = 1.0
-    avg_table_evidence_hit_rate: float = 1.0
-    avg_ocr_evidence_hit_rate: float = 1.0
-    avg_ocr_text_hit_rate: float = 1.0
     avg_citation_accuracy: float = 1.0
-    avg_answer_relevance: float = 0.0
-    avg_faithfulness_proxy: float = 0.0
-    avg_claim_hit_rate: float = 1.0
-    avg_forbidden_claim_rate: float = 0.0
-    avg_refusal_correctness: float = 1.0
-    avg_relation_hit: float = 1.0
-    avg_visual_warning_count: float = 0.0
     embedding_fallback_count: int = 0
     embedding_fallback_rate: float = 0.0
-    avg_judge_score: float = 0.0
-    judge_coverage: float = 0.0
-    segment_metrics: dict[str, dict[str, float]] = Field(default_factory=dict)
     result_status_counts: dict[str, int] = Field(default_factory=dict)
     failure_category_counts: dict[str, int] = Field(default_factory=dict)
     grading_summary: dict[str, Any] = Field(default_factory=dict)
     evaluation_trustworthy: bool = True
-    trust_gate_status: str = "passed"
-    trust_gate_failures: list[dict[str, Any]] = Field(default_factory=list)
     experiment_metadata: dict[str, Any] = Field(default_factory=dict)
     avg_score: float = 0.0
     avg_latency_ms: int

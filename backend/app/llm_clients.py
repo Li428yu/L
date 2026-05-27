@@ -195,19 +195,34 @@ class ModelClients:
                 provider=LOCAL_HASH_EMBEDDING_PROVIDER,
                 used_fallback=False,
             )
+        resolved_model = model or self.settings.default_embedding_model
+        if self._is_multimodal_embedding_model(resolved_model):
+            try:
+                return EmbeddingResult(
+                    vectors=self._embed_texts_with_multimodal_api(texts, resolved_model),
+                    provider=resolved_model,
+                    used_fallback=False,
+                )
+            except Exception as exc:
+                fallback_reason = self._embedding_error_summary(exc)
+                return EmbeddingResult(
+                    vectors=[self._local_embedding(text) for text in texts],
+                    provider=LOCAL_FALLBACK_EMBEDDING_PROVIDER,
+                    used_fallback=True,
+                    fallback_reason=fallback_reason[:500],
+                )
         try:
-            client = self.embeddings(model)
+            client = self.embeddings(resolved_model)
             vectors = self._with_retry(lambda: client.embed_documents(texts))
             return EmbeddingResult(
                 vectors=vectors,
-                provider=model or self.settings.default_embedding_model,
+                provider=resolved_model,
                 used_fallback=False,
             )
         except Exception as exc:
             fallback_reason = self._embedding_error_summary(exc)
             if self._should_try_multimodal_embeddings(exc, model):
                 try:
-                    resolved_model = model or self.settings.default_embedding_model
                     return EmbeddingResult(
                         vectors=self._embed_texts_with_multimodal_api(texts, resolved_model),
                         provider=resolved_model,
@@ -242,18 +257,33 @@ class ModelClients:
                 used_fallback=True,
                 fallback_reason="目标文档使用本地备用检索索引，查询向量需保持同一向量空间。",
             )
+        resolved_model = model or self.settings.default_embedding_model
+        if self._is_multimodal_embedding_model(resolved_model):
+            try:
+                return QueryEmbeddingResult(
+                    vector=self._embed_texts_with_multimodal_api([text], resolved_model)[0],
+                    provider=resolved_model,
+                    used_fallback=False,
+                )
+            except Exception as exc:
+                fallback_reason = self._embedding_error_summary(exc)
+                return QueryEmbeddingResult(
+                    vector=self._local_embedding(text),
+                    provider=LOCAL_FALLBACK_EMBEDDING_PROVIDER,
+                    used_fallback=True,
+                    fallback_reason=fallback_reason[:500],
+                )
         try:
-            client = self.embeddings(model)
+            client = self.embeddings(resolved_model)
             return QueryEmbeddingResult(
                 vector=self._with_retry(lambda: client.embed_query(text)),
-                provider=model or self.settings.default_embedding_model,
+                provider=resolved_model,
                 used_fallback=False,
             )
         except Exception as exc:
             fallback_reason = self._embedding_error_summary(exc)
             if self._should_try_multimodal_embeddings(exc, model):
                 try:
-                    resolved_model = model or self.settings.default_embedding_model
                     return QueryEmbeddingResult(
                         vector=self._embed_texts_with_multimodal_api([text], resolved_model)[0],
                         provider=resolved_model,
@@ -308,11 +338,15 @@ class ModelClients:
         cause = getattr(exc, "__cause__", None)
         error_text = f"{exc} {cause or ''}".lower()
         return (
-            "embedding-vision" in model_name
+            self._is_multimodal_embedding_model(model_name)
             or "multimodal" in error_text
             or "does not support this api" in error_text
             or "invalidparameter" in error_text
         )
+
+    def _is_multimodal_embedding_model(self, model: str | None) -> bool:
+        model_name = str(model or "").lower()
+        return "embedding-vision" in model_name or "multimodal" in model_name
 
     def _embed_texts_with_multimodal_api(
         self,

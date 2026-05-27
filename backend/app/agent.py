@@ -9,6 +9,8 @@ from langgraph.graph import END, START, StateGraph
 
 from backend.app.agent_parts.events import AgentEvent, final_event, status_event, token_event
 from backend.app.agent_parts.answering import AgentAnsweringMixin
+from backend.app.agent_parts.claim_slots import AgentClaimSlotMixin
+from backend.app.agent_parts.citation_stability import AgentCitationStabilityMixin
 from backend.app.agent_parts.evidence_coverage import AgentEvidenceCoverageMixin
 from backend.app.agent_parts.planning import AgentPlanningMixin
 from backend.app.agent_parts.retrieval import AgentRetrievalMixin
@@ -43,6 +45,8 @@ class PaperAgentService(
     AgentRetrievalMixin,
     AgentVerificationMixin,
     AgentEvidenceCoverageMixin,
+    AgentClaimSlotMixin,
+    AgentCitationStabilityMixin,
     AgentAnsweringMixin,
     AgentTextUtilityMixin,
 ):
@@ -291,22 +295,51 @@ class PaperAgentService(
             if key in visible_chunks:
                 continue
             score = float(direct_support_scorer(question=question, item=item) or 0.0)
+            relevance = self._question_relevance_score(question, f"{item.paper_name}\n{item.quote}\n{item.text}")
+            score += item.score * 0.35 + relevance * 0.75
             if self._is_visual_evidence_item(item):
                 if visual_question:
                     score += 0.35
                 else:
                     score -= 0.45
-            threshold = 1.35 if visual_question and self._is_visual_evidence_item(item) else 2.0
+            threshold = 1.15 if visual_question and self._is_visual_evidence_item(item) else 1.45
             if score < threshold:
                 continue
             supplemental.append((score, position, item))
 
         supplemental.sort(key=lambda row: (row[0], -row[1]), reverse=True)
-        room = max(0, min(2, limit - len(visible)))
+        room = max(0, limit - len(visible))
         for _, _, item in supplemental[:room]:
             visible.append(item)
         if not visible and supplemental:
             visible.append(supplemental[0][2])
+        if len(visible) < limit:
+            visible_chunks = {f"{item.document_id}:{item.chunk_id}" for item in visible}
+            fallback_ranked = sorted(
+                [
+                    (
+                        item.score
+                        + self._question_relevance_score(question, f"{item.paper_name}\n{item.quote}\n{item.text}") * 0.75,
+                        position,
+                        item,
+                    )
+                    for position, item in enumerate(evidence)
+                    if f"{item.document_id}:{item.chunk_id}" not in visible_chunks
+                ],
+                key=lambda row: (row[0], -row[1]),
+                reverse=True,
+            )
+            for _, _, item in fallback_ranked[: max(0, limit - len(visible))]:
+                visible.append(item)
+        if not cited_ids:
+            stabilizer = getattr(self, "_stabilize_final_evidence_citations", None)
+            if callable(stabilizer):
+                visible = stabilizer(
+                    question=question,
+                    selected=visible,
+                    candidates=evidence,
+                    limit=limit,
+                )
         return visible[:limit]
 
     def attach_related_images(

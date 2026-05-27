@@ -158,6 +158,29 @@ class EvidenceCoverageTests(unittest.TestCase):
         self.assertTrue(decision["should_refuse"])
         self.assertEqual(decision["reason_code"], "missing_visual_evidence")
 
+    def test_ocr_question_accepts_text_read_from_visual_summary(self) -> None:
+        harness = EvidenceCoverageHarness()
+        evidence = [
+            make_evidence(
+                chunk_type="image",
+                image_id="image-1",
+                text="图片实际内容 这是 LinnSequencer 32轨 MIDI 序列录音机的产品说明页，文字清晰可识别。",
+            )
+        ]
+
+        decision = harness._evidence_coverage_decision(
+            state={
+                "question": "What does the OCR scanned image say?",
+                "needs_retrieval": True,
+                "evidence": evidence,
+                "evidence_quality": "strong",
+                "evidence_judgments": [{"chunk_id": "chunk-1", "verdict": "direct"}],
+            },
+            prompt_evidence=evidence,
+        )
+
+        self.assertFalse(decision["should_refuse"])
+
 
 if __name__ == "__main__":
     unittest.main()

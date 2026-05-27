@@ -47,6 +47,7 @@ class AgentRetrievalMixin(
             state["question"],
             candidate_evidence,
             top_k=state["top_k"],
+            target_document_ids=document_ids,
         )
         evidence, evidence_quality_trace = self._annotate_retrieval_quality(
             question=state["question"],
@@ -891,7 +892,7 @@ class AgentRetrievalMixin(
                 break
 
         per_document_cap = max(2, limit // max(len(target_document_ids), 1) + 1)
-        per_document_counts: dict[str, int] = {}
+        per_document_counts: dict[str, int] = Counter(item.document_id for item in selected if item.document_id)
         for _, _, item in ranked:
             if item.chunk_id in selected_chunks:
                 continue
@@ -1337,9 +1338,7 @@ class AgentRetrievalMixin(
         return [item for _, _, item in scored[: max(top_k, 1)]]
 
     def _looks_like_visual_retrieval_question(self, question: str) -> bool:
-        normalized = question.lower()
-        keywords = ["图片", "图像", "截图", "运行截图", "图表", "图中", "视觉", "image", "figure", "chart"]
-        return any(keyword in normalized for keyword in keywords)
+        return self._looks_like_visual_question_text(question)
 
     def _vector_similarity_evidence(
         self,

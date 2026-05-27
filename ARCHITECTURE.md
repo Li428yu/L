@@ -14,10 +14,9 @@ backend/app/vector_store.py Chroma 持久化向量库
 backend/app/agent.py        LangGraph RAG agent
 backend/app/memory.py       用户画像、长期偏好、短期历史
 backend/app/storage.py      SQLite 元数据存储
-backend/app/evaluation.py   回归评测能力，默认不展示在用户界面
+backend/app/evaluation.py   最小健康检查，默认不展示在用户界面
 backend/app/eval_baselines.py
                             评测基线分层、默认基线和评测文档选择
-backend/app/eval_audit.py   评测集质量审计
 data/                       上传文件、Chroma、SQLite，默认不入库
 evals/                      固定问题评测集与 baselines.json
 ```
@@ -159,6 +158,6 @@ Dense 向量召回（Chroma cosine）
 | 证据定位 | 已有页码/段落/PDF 页跳转 | 接 PDF.js 做坐标级高亮 |
 | 模型切换 | 已有阅读方式预设 | 增加 provider、成本、失败提示说明 |
 | 记忆 | 已有画像/偏好/短期历史 | 增加会话摘要和跨 500 轮压缩记忆 |
-| 评测 | 后端保留接口和示例集，前端默认不展示 | 固定论文、保存历史指标、对比优化前后 |
+| 评测 | 后端只保留基础健康检查，前端默认不展示 | 观察证据链路是否可用、引用是否可点开 |
 | 异步任务 | FastAPI BackgroundTasks | 长任务迁移 Celery/RQ |
 | 错误处理 | 已有主要提示和 fallback | 增加 OCR、限流、向量库连接失败细分 |

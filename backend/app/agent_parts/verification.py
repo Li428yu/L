@@ -149,6 +149,7 @@ class AgentVerificationMixin:
             "local_field_lookup_answer": "本地规则提取指定字段",
             "local_compare_answer": "本地规则对比多文档",
             "local_document_answer": "本地规则概括文档",
+            "local_structured_evidence_answer": "本地规则整理结构化证据",
             "missing_evidence_refusal": "证据不足，拒绝硬答",
             "model_answer": "模型基于证据生成",
             "model_unavailable": "模型不可用，未本地兜底",

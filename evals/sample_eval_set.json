@@ -1,78 +1,40 @@
 {
-  "suite_name": "paper_assistant_regression",
-  "description": "默认回归评测集。请根据你实际上传的文档，把 expected_document、expected_pages、expected_keywords 补得更精确。",
+  "suite_name": "paper_assistant_smoke",
+  "description": "轻量健康检查 + 证据准确性守门：只确认问答链路、可点击引用、正确文档覆盖和关键证据词，不作为论文级质量分数。",
   "cases": [
     {
-      "id": "single_doc_core_contribution",
-      "question": "这篇文档的核心贡献是什么？请给出证据。",
-      "expected_keywords": ["核心", "贡献", "证据"],
-      "expected_evidence_keywords": ["贡献", "方法", "结果"],
-      "judge_rubric": "回答必须区分原文证据和自己的概括，不要泛泛而谈。"
+      "id": "single_doc_summary_with_evidence",
+      "question": "请概括当前文档的核心内容，并给出证据。",
+      "expected_keywords": ["核心", "内容", "证据"]
     },
     {
-      "id": "single_doc_method_design",
-      "question": "请总结文档的方法设计，并指出关键模块。",
-      "expected_keywords": ["方法", "设计", "模块"],
-      "expected_evidence_keywords": ["方法", "模块", "实验"],
-      "judge_rubric": "如果文档没有模块概念，应明确说明证据不足。"
+      "id": "method_or_design_with_evidence",
+      "question": "这份文档的方法、设计或实现流程是什么？请基于证据回答。",
+      "expected_keywords": ["方法", "设计", "流程", "实现"],
+      "expected_evidence_keywords": ["方法", "设计", "流程", "实现", "步骤"]
     },
     {
-      "id": "single_doc_limitations",
-      "question": "这篇文档有哪些局限或不足？",
-      "expected_keywords": ["局限", "不足"],
-      "expected_evidence_keywords": ["局限", "不足", "未来"],
-      "judge_rubric": "不要把自己推测的不足写成原文已经说明的不足。"
-    },
-    {
-      "id": "citation_support",
-      "question": "请列出两个关键结论，并分别标注引用证据。",
-      "expected_keywords": ["结论", "证据"],
-      "expected_evidence_keywords": ["结论", "结果"],
-      "judge_rubric": "每个关键结论后都应有有效引用，引用必须能支撑对应结论。"
+      "id": "key_result_or_conclusion",
+      "question": "文档给出了哪些关键结果或结论？请分别标注引用证据。",
+      "expected_keywords": ["结果", "结论", "证据"],
+      "expected_evidence_keywords": ["结果", "结论", "实验", "发现"]
     },
     {
       "id": "multi_doc_overview",
-      "question": "如果当前选中了多篇文档，请分别说明每篇文档主要讲什么，再总结共同主题。",
-      "expected_keywords": ["共同", "分别"],
-      "relation_keywords": ["共同", "分别"],
-      "required_document_count": 2,
-      "judge_rubric": "多文档时必须按文档分开，不要把几篇文档混成一个结论。"
+      "question": "如果当前有多份文档，请分别说明每份文档主要讲什么，再总结共同主题。",
+      "expected_keywords": ["分别", "共同", "主题"],
+      "required_document_count": 2
     },
     {
-      "id": "multi_doc_difference",
-      "question": "这些文档之间有哪些差异点？适合表格时可以用表格。",
-      "expected_keywords": ["差异", "文档"],
-      "relation_keywords": ["差异", "不同"],
-      "required_document_count": 2,
-      "judge_rubric": "如果使用表格，表格必须可读；如果证据不足，应说明缺少哪篇文档的依据。"
-    },
-    {
-      "id": "multi_doc_relation",
-      "question": "这些文献之间是互补、支持还是冲突关系？请基于证据判断。",
-      "expected_keywords": ["互补", "支持", "冲突", "证据"],
-      "relation_keywords": ["互补", "支持", "冲突"],
-      "required_document_count": 2,
-      "judge_rubric": "不能只说关系词，必须解释关系为什么成立，并引用对应文档证据。"
-    },
-    {
-      "id": "visual_evidence",
-      "question": "文档中的图片、图表或截图提供了什么证据？请只引用相关图片。",
-      "expected_keywords": ["图片", "图表", "证据"],
-      "expected_modalities": ["image", "vision"],
-      "judge_rubric": "必须只使用真实相关的图片证据；不要把同页无关图片也当作证据。"
-    },
-    {
-      "id": "table_or_structured_data",
-      "question": "如果文档里有表格或结构化数据，请总结它说明了什么。",
-      "expected_keywords": ["表格", "数据"],
-      "expected_modalities": ["table"],
-      "judge_rubric": "如果没有表格或结构化数据，应说明没有找到直接证据。"
+      "id": "evidence_detail_check",
+      "question": "请选择一个最能支撑回答的原文证据，并说明它为什么相关。",
+      "expected_keywords": ["证据", "相关", "支撑"]
     },
     {
       "id": "insufficient_evidence_refusal",
-      "question": "请判断这篇文档是否已经证明了一个和原文无关的结论：它能显著提高临床诊断准确率。",
-      "expected_keywords": ["证据不足", "无法证明"],
-      "judge_rubric": "如果文档没有临床诊断相关证据，应该拒绝给出肯定结论。"
+      "question": "请判断这些文档是否已经证明了一个与原文无关的结论：它能显著提高临床诊断准确率。",
+      "expected_keywords": ["证据不足", "无法证明", "没有证据"],
+      "expected_refusal": true
     }
   ]
 }

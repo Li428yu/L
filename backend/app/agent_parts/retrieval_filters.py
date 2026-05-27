@@ -12,6 +12,7 @@ class AgentRetrievalFilterMixin:
         evidence: list[EvidenceItem],
         *,
         top_k: int,
+        target_document_ids: list[str] | None = None,
     ) -> list[EvidenceItem]:
         if not evidence:
             return []
@@ -23,6 +24,10 @@ class AgentRetrievalFilterMixin:
             document_id
             for document_id in dict.fromkeys(item.document_id for item in evidence if item.document_id)
         ]
+        coverage_document_ids = self._coverage_target_document_ids(
+            target_document_ids=target_document_ids,
+            candidate_document_ids=unique_documents,
+        )
         if reference_question:
             selected: list[EvidenceItem] = []
             seen_references: set[str] = set()
@@ -40,7 +45,12 @@ class AgentRetrievalFilterMixin:
                 candidates=evidence,
                 limit=max(2, min(top_k + 1, 6)),
             )
-            return self._renumber_evidence(selected)
+            return self._finalize_filtered_evidence(
+                question=question,
+                selected=selected,
+                candidates=evidence,
+                limit=max(2, min(top_k + 1, 6)),
+            )
 
         if self._looks_like_broad_overview_question(question):
             if len(unique_documents) > 1:
@@ -57,7 +67,19 @@ class AgentRetrievalFilterMixin:
                 candidates=evidence,
                 limit=max(3, min(top_k, len(evidence))),
             )
-            return self._renumber_evidence(selected)
+            selected = self._ensure_multi_document_coverage_if_needed(
+                question=question,
+                selected=selected,
+                evidence=evidence,
+                target_document_ids=coverage_document_ids,
+                limit=max(3, min(top_k, len(evidence))),
+            )
+            return self._finalize_filtered_evidence(
+                question=question,
+                selected=selected,
+                candidates=evidence,
+                limit=max(3, min(top_k, len(evidence))),
+            )
 
         if field_lookup_question:
             selected: list[EvidenceItem] = []
@@ -77,7 +99,12 @@ class AgentRetrievalFilterMixin:
                 candidates=evidence,
                 limit=max(len(selected), top_k),
             )
-            return self._renumber_evidence(selected)
+            return self._finalize_filtered_evidence(
+                question=question,
+                selected=selected,
+                candidates=evidence,
+                limit=max(len(selected), top_k),
+            )
 
         if allow_tables:
             table_evidence = [
@@ -171,7 +198,19 @@ class AgentRetrievalFilterMixin:
                     candidates=evidence,
                     limit=top_k,
                 )
-                return self._renumber_evidence(selected)
+                selected = self._ensure_multi_document_coverage_if_needed(
+                    question=question,
+                    selected=selected,
+                    evidence=evidence,
+                    target_document_ids=coverage_document_ids,
+                    limit=top_k,
+                )
+                return self._finalize_filtered_evidence(
+                    question=question,
+                    selected=selected,
+                    candidates=evidence,
+                    limit=top_k,
+                )
 
         if self._looks_like_framework_function_question(question):
             selected = self._select_framework_function_evidence(
@@ -184,7 +223,7 @@ class AgentRetrievalFilterMixin:
                     question=question,
                     selected=selected,
                     evidence=evidence,
-                    target_document_ids=unique_documents,
+                    target_document_ids=coverage_document_ids,
                     limit=top_k,
                 )
                 selected = self._repair_final_evidence_selection(
@@ -193,7 +232,19 @@ class AgentRetrievalFilterMixin:
                     candidates=evidence,
                     limit=top_k,
                 )
-                return self._renumber_evidence(selected)
+                selected = self._ensure_multi_document_coverage_if_needed(
+                    question=question,
+                    selected=selected,
+                    evidence=evidence,
+                    target_document_ids=coverage_document_ids,
+                    limit=top_k,
+                )
+                return self._finalize_filtered_evidence(
+                    question=question,
+                    selected=selected,
+                    candidates=evidence,
+                    limit=top_k,
+                )
 
         keyword_selected = self._select_special_keyword_evidence(
             question=question,
@@ -205,7 +256,7 @@ class AgentRetrievalFilterMixin:
                 question=question,
                 selected=keyword_selected,
                 evidence=evidence,
-                target_document_ids=unique_documents,
+                target_document_ids=coverage_document_ids,
                 limit=top_k,
             )
             keyword_selected = self._repair_final_evidence_selection(
@@ -214,24 +265,49 @@ class AgentRetrievalFilterMixin:
                 candidates=evidence,
                 limit=top_k,
             )
-            return self._renumber_evidence(keyword_selected)
+            keyword_selected = self._ensure_multi_document_coverage_if_needed(
+                question=question,
+                selected=keyword_selected,
+                evidence=evidence,
+                target_document_ids=coverage_document_ids,
+                limit=top_k,
+            )
+            return self._finalize_filtered_evidence(
+                question=question,
+                selected=keyword_selected,
+                candidates=evidence,
+                limit=top_k,
+            )
 
         if len(unique_documents) > 1 and (
             self._looks_like_compare_question(question)
             or self._looks_like_multi_document_topic_question(question)
         ):
+            limit = max(top_k, min(len(evidence), len(unique_documents) * 2))
             selected = self._select_document_balanced_evidence(
                 question=question,
                 evidence=evidence,
-                limit=max(top_k, min(len(evidence), len(unique_documents) * 2)),
+                limit=limit,
             )
             selected = self._repair_final_evidence_selection(
                 question=question,
                 selected=selected,
                 candidates=evidence,
-                limit=max(top_k, min(len(evidence), len(unique_documents) * 2)),
+                limit=limit,
             )
-            return self._renumber_evidence(selected)
+            selected = self._ensure_multi_document_coverage_if_needed(
+                question=question,
+                selected=selected,
+                evidence=evidence,
+                target_document_ids=coverage_document_ids,
+                limit=limit,
+            )
+            return self._finalize_filtered_evidence(
+                question=question,
+                selected=selected,
+                candidates=evidence,
+                limit=limit,
+            )
 
         seen: set[str] = set()
         scored: list[tuple[float, int, EvidenceItem]] = []
@@ -266,7 +342,37 @@ class AgentRetrievalFilterMixin:
             candidates=evidence,
             limit=target_count,
         )
-        return self._renumber_evidence(selected)
+        selected = self._ensure_multi_document_coverage_if_needed(
+            question=question,
+            selected=selected,
+            evidence=evidence,
+            target_document_ids=coverage_document_ids,
+            limit=target_count,
+        )
+        return self._finalize_filtered_evidence(
+            question=question,
+            selected=selected,
+            candidates=evidence,
+            limit=target_count,
+        )
+
+    def _finalize_filtered_evidence(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        candidates: list[EvidenceItem],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        stabilizer = getattr(self, "_stabilize_final_evidence_citations", None)
+        if callable(stabilizer):
+            selected = stabilizer(
+                question=question,
+                selected=selected,
+                candidates=candidates,
+                limit=limit,
+            )
+        return self._renumber_evidence(selected[: max(1, limit)])
 
     def _repair_final_evidence_selection(
         self,
@@ -324,6 +430,39 @@ class AgentRetrievalFilterMixin:
             selected_chunks = {candidate.chunk_id for candidate in selected}
             if item.chunk_id in selected_chunks:
                 repairs += 1
+
+        if visual_question and not any(self._is_visual_evidence_item(item) for item in selected):
+            visual_candidates: list[tuple[float, int, EvidenceItem]] = []
+            for position, item in enumerate(candidates):
+                if item.chunk_id in selected_chunks or not self._is_visual_evidence_item(item):
+                    continue
+                text = self._sanitize_evidence_text(f"{item.paper_name}\n{item.section or ''}\n{item.quote}\n{item.text}")
+                support_score = self._final_evidence_direct_support_score(question=question, item=item)
+                relevance = self._question_relevance_score(question, text)
+                visual_score = support_score + relevance + item.score * 0.25
+                if visual_score >= 1.0 or relevance >= 0.18:
+                    visual_candidates.append((visual_score, position, item))
+            visual_candidates.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+            if visual_candidates:
+                _, _, visual_item = visual_candidates[0]
+                self._set_final_support_quote(question=question, item=visual_item)
+                selected = [item for item in selected if item.chunk_id != visual_item.chunk_id]
+                if len(selected) >= limit:
+                    replacement_scores = [
+                        (
+                            self._final_evidence_direct_support_score(question=question, item=item),
+                            position,
+                        )
+                        for position, item in enumerate(selected)
+                        if not self._is_visual_evidence_item(item)
+                    ]
+                    if replacement_scores:
+                        _, drop_index = min(replacement_scores, key=lambda row: (row[0], -row[1]))
+                        selected.pop(drop_index)
+                    else:
+                        selected = selected[: max(0, limit - 1)]
+                selected.insert(0, visual_item)
+                selected_chunks = {candidate.chunk_id for candidate in selected}
 
         return selected[:limit]
 
@@ -732,6 +871,62 @@ class AgentRetrievalFilterMixin:
             return {"govern", "identify", "protect", "detect", "respond", "recover"}
         return set()
 
+    def _coverage_target_document_ids(
+        self,
+        *,
+        target_document_ids: list[str] | None,
+        candidate_document_ids: list[str],
+    ) -> list[str]:
+        candidate_ids = list(dict.fromkeys(document_id for document_id in candidate_document_ids if document_id))
+        if not target_document_ids:
+            return candidate_ids
+        candidate_set = set(candidate_ids)
+        scoped_ids = [
+            document_id
+            for document_id in dict.fromkeys(target_document_ids)
+            if document_id and document_id in candidate_set
+        ]
+        return scoped_ids or candidate_ids
+
+    def _ensure_multi_document_coverage_if_needed(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        evidence: list[EvidenceItem],
+        target_document_ids: list[str],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        if not self._should_enforce_multi_document_coverage(
+            question=question,
+            target_document_ids=target_document_ids,
+            limit=limit,
+        ):
+            return selected[:limit]
+        return self._ensure_selected_document_coverage(
+            question=question,
+            selected=selected,
+            evidence=evidence,
+            target_document_ids=target_document_ids,
+            limit=limit,
+        )
+
+    def _should_enforce_multi_document_coverage(
+        self,
+        *,
+        question: str,
+        target_document_ids: list[str],
+        limit: int,
+    ) -> bool:
+        target_count = len([document_id for document_id in target_document_ids if document_id])
+        if target_count <= 1 or target_count > max(4, limit):
+            return False
+        return (
+            self._looks_like_compare_question(question)
+            or self._looks_like_multi_document_topic_question(question)
+            or self._looks_like_broad_overview_question(question)
+        )
+
     def _ensure_selected_document_coverage(
         self,
         *,
@@ -759,15 +954,23 @@ class AgentRetrievalFilterMixin:
             if not candidates:
                 continue
             ranked = sorted(
-                candidates,
-                key=lambda item: (
-                    item.score
-                    + self._question_relevance_score(question, f"{item.paper_name}\n{item.text}") * 0.65
-                    + self._readable_text_score(self._sanitize_evidence_text(item.text)) * 0.15
-                ),
+                [
+                    (
+                        self._final_evidence_direct_support_score(question=question, item=item)
+                        + self._question_relevance_score(question, f"{item.paper_name}\n{item.text}") * 0.8
+                        + self._readable_text_score(self._sanitize_evidence_text(item.text)) * 0.15,
+                        position,
+                        item,
+                    )
+                    for position, item in enumerate(candidates)
+                ],
+                key=lambda row: (row[0], -row[1]),
                 reverse=True,
             )
-            item = ranked[0]
+            item_score, _, item = ranked[0]
+            relevance = self._question_relevance_score(question, f"{item.paper_name}\n{item.text}")
+            if item_score < 1.15 and relevance < 0.12:
+                continue
             item.quote = self._best_quote_for_question(question, item.text)
             additions.append(item)
             selected_chunks.add(item.chunk_id)
@@ -777,7 +980,14 @@ class AgentRetrievalFilterMixin:
         merged = [*selected, *additions]
         if len(merged) <= limit:
             return merged
+        target_id_set = set(target_document_ids)
         protected_chunks = {item.chunk_id for item in additions}
+        protected_document_ids: set[str] = set()
+        for item in selected:
+            if item.document_id not in target_id_set or item.document_id in protected_document_ids:
+                continue
+            protected_chunks.add(item.chunk_id)
+            protected_document_ids.add(item.document_id)
         kept = [item for item in merged if item.chunk_id in protected_chunks]
         for item in merged:
             if item.chunk_id in protected_chunks:

@@ -141,8 +141,8 @@ answer -> verifier -> memory_writer
 
 ## 教学实验与评测
 
-固定问题评测集仍保留在后端和 `evals/` 目录中，用于开发阶段做回归测试；它不再出现在普通问答页面里，避免用户误以为系统在回答当前问题时额外跑了多个问题。
+固定问题评测集只作为开发阶段的轻量健康检查；它不出现在普通问答页面里，也不是 demo 的主线。
 
-评测默认基线由 `evals/baselines.json` 管理。当前默认只跑 `pdf_gold_current`，也就是带 `expected_chunk_ids` 的 PDF gold 基线；缺失本地 DOCX 文档的网络程序设计和 PDF/DOCX 混合基线已标记为 paused，避免不可运行 case 污染平均分。
+默认评测只跑 `sample_smoke`，定位是“证据准确性守门”：确认问答链路能跑、能检索证据、回答里有可点击引用、证据覆盖指定文档或文档数量、被引用证据命中少量关键依据词，并标出 embedding fallback。它不再输出复杂 PDF/DOCX 横向跑分。
 
-每轮评测会额外输出分级报告：单条 case 有 `result_status`、`failure_categories` 和 `grading_reasons`，整轮结果有 `result_status_counts`、`failure_category_counts`、`evaluation_trustworthy` 和 `trust_gate_status`。如果发生 embedding fallback，本轮会被标为 `not_comparable`，只能用于诊断，不能作为可信基线或横向对比成绩。
+复杂 PDF/DOCX 评测集和对应旧评分代码已删除；当前项目重点放在自然问答、可点击证据和讲清楚 RAG 链路上。

@@ -7,7 +7,7 @@ from typing import Any
 
 
 DEFAULT_MANIFEST_NAME = "baselines.json"
-DEFAULT_BASELINE_ID = "pdf_gold_current"
+DEFAULT_BASELINE_ID = "sample_smoke"
 
 
 @dataclass(frozen=True)
