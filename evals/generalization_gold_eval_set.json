@@ -1,0 +1,199 @@
+{
+  "suite_name": "generalization_gold_v1",
+  "description": "Unseen-paper RAG generalization benchmark. It avoids the original demo/sample papers and checks method, result, dataset, efficiency, cross-document comparison, and unsupported-claim refusal behavior.",
+  "cases": [
+    {
+      "id": "efficientnet_method_001",
+      "case_type": "method",
+      "difficulty": "medium",
+      "tags": ["unseen", "method", "model_scaling"],
+      "question": "How does the EfficientNet paper describe its compound scaling method?",
+      "expected_document": "efficientnet.pdf",
+      "gold_evidence": [
+        {
+          "document": "efficientnet.pdf",
+          "text_contains": ["compound coefficient", "uniformly scales network width, depth, and resolution"]
+        },
+        {
+          "document": "efficientnet.pdf",
+          "text_contains": ["balancing network depth, width, and resolution", "better performance"]
+        }
+      ],
+      "expected_answer_points": ["compound coefficient", "depth", "width", "resolution"]
+    },
+    {
+      "id": "efficientnet_result_002",
+      "case_type": "result",
+      "difficulty": "easy",
+      "tags": ["unseen", "result", "benchmark"],
+      "question": "What ImageNet result does EfficientNet-B7 report, and what efficiency comparison is claimed?",
+      "expected_document": "efficientnet.pdf",
+      "gold_evidence": [
+        {
+          "document": "efficientnet.pdf",
+          "text_contains": ["EfficientNet-B7", "84.3% top-1 accuracy"]
+        },
+        {
+          "document": "efficientnet.pdf",
+          "text_contains": ["8.4x smaller", "6.1x faster"]
+        }
+      ],
+      "expected_answer_points": ["84.3% top-1 accuracy", "8.4x smaller", "6.1x faster"]
+    },
+    {
+      "id": "focal_loss_method_001",
+      "case_type": "method",
+      "difficulty": "medium",
+      "tags": ["unseen", "method", "loss_function"],
+      "question": "What problem does focal loss address in dense object detection, and how does it change cross entropy?",
+      "expected_document": "focal-loss.pdf",
+      "gold_evidence": [
+        {
+          "document": "focal-loss.pdf",
+          "text_contains": ["class imbalance", "dense detectors"]
+        },
+        {
+          "document": "focal-loss.pdf",
+          "text_contains": ["down-weights the loss assigned to well-classified examples", "hard examples"]
+        }
+      ],
+      "expected_answer_points": ["class imbalance", "down-weights", "well-classified examples", "hard examples"]
+    },
+    {
+      "id": "focal_loss_result_002",
+      "case_type": "result",
+      "difficulty": "easy",
+      "tags": ["unseen", "result", "object_detection"],
+      "question": "What does the focal loss paper claim about RetinaNet compared with previous detectors?",
+      "expected_document": "focal-loss.pdf",
+      "gold_evidence": [
+        {
+          "document": "focal-loss.pdf",
+          "text_contains": ["RetinaNet", "one-stage detector"]
+        },
+        {
+          "document": "focal-loss.pdf",
+          "text_contains": ["surpass the accuracy", "state-of-the-art two-stage detectors"]
+        }
+      ],
+      "expected_answer_points": ["RetinaNet", "one-stage detector", "surpass the accuracy", "two-stage detectors"]
+    },
+    {
+      "id": "simclr_method_001",
+      "case_type": "method",
+      "difficulty": "medium",
+      "tags": ["unseen", "method", "contrastive_learning"],
+      "question": "How does SimCLR define the main contrastive learning setup?",
+      "expected_document": "simclr.pdf",
+      "gold_evidence": [
+        {
+          "document": "simclr.pdf",
+          "text_contains": ["maximizing agreement", "differently augmented views"]
+        },
+        {
+          "document": "simclr.pdf",
+          "text_contains": ["contrastive loss", "same data example"]
+        }
+      ],
+      "expected_answer_points": ["maximizing agreement", "augmented views", "contrastive loss"]
+    },
+    {
+      "id": "simclr_factors_002",
+      "case_type": "method",
+      "difficulty": "hard",
+      "tags": ["unseen", "ablation", "training_recipe"],
+      "question": "Which design or training factors does SimCLR identify as important for learned representations?",
+      "expected_document": "simclr.pdf",
+      "gold_evidence": [
+        {
+          "document": "simclr.pdf",
+          "text_contains": ["composition of data augmentations", "critical role"]
+        },
+        {
+          "document": "simclr.pdf",
+          "text_contains": ["learnable nonlinear transformation", "contrastive loss"]
+        },
+        {
+          "document": "simclr.pdf",
+          "text_contains": ["larger batch sizes", "more training steps"]
+        }
+      ],
+      "expected_answer_points": ["data augmentations", "nonlinear transformation", "larger batch sizes|more training steps"]
+    },
+    {
+      "id": "lora_method_001",
+      "case_type": "method",
+      "difficulty": "medium",
+      "tags": ["unseen", "method", "parameter_efficient_tuning"],
+      "question": "What is LoRA's main adaptation idea?",
+      "expected_document": "lora.pdf",
+      "gold_evidence": [
+        {
+          "document": "lora.pdf",
+          "text_contains": ["freezing the pre-trained model weights", "rank decomposition matrices"]
+        },
+        {
+          "document": "lora.pdf",
+          "text_contains": ["trainable rank decomposition matrices", "each layer"]
+        }
+      ],
+      "expected_answer_points": ["freezing", "pre-trained model weights", "rank decomposition matrices"]
+    },
+    {
+      "id": "lora_efficiency_002",
+      "case_type": "result",
+      "difficulty": "easy",
+      "tags": ["unseen", "result", "efficiency"],
+      "question": "What efficiency benefits does the LoRA abstract report?",
+      "expected_document": "lora.pdf",
+      "gold_evidence": [
+        {
+          "document": "lora.pdf",
+          "text_contains": ["trainable parameters", "10,000 times"]
+        },
+        {
+          "document": "lora.pdf",
+          "text_contains": ["GPU memory requirement", "3 times"]
+        }
+      ],
+      "expected_answer_points": ["10,000 times", "GPU memory", "3 times"]
+    },
+    {
+      "id": "cross_efficiency_compare_001",
+      "case_type": "compare",
+      "difficulty": "hard",
+      "tags": ["unseen", "multi_document", "efficiency"],
+      "question": "Compare how EfficientNet and LoRA pursue efficiency. Use evidence from both papers.",
+      "expected_documents": ["efficientnet.pdf", "lora.pdf"],
+      "required_document_count": 2,
+      "gold_evidence": [
+        {
+          "document": "efficientnet.pdf",
+          "text_contains": ["compound coefficient", "width, depth, and resolution"]
+        },
+        {
+          "document": "lora.pdf",
+          "text_contains": ["freezing the pre-trained model weights", "rank decomposition matrices"]
+        }
+      ],
+      "expected_answer_points": ["EfficientNet", "compound scaling|width, depth, and resolution", "LoRA", "rank decomposition matrices|trainable parameters"],
+      "relation_keywords": ["compare", "efficiency"]
+    },
+    {
+      "id": "unsupported_cross_domain_001",
+      "case_type": "refusal",
+      "difficulty": "easy",
+      "tags": ["unseen", "refusal", "scope_control"],
+      "question": "Does the focal loss paper prove that low-rank adaptation reduces trainable parameters in language model fine-tuning?",
+      "expected_document": "focal-loss.pdf",
+      "expected_refusal": true,
+      "gold_evidence": [
+        {
+          "document": "focal-loss.pdf",
+          "text_contains": ["dense object detector", "class imbalance"]
+        }
+      ],
+      "expected_answer_points": ["cannot prove|not enough evidence|does not support", "object detection|class imbalance", "low-rank adaptation|language model"]
+    }
+  ]
+}

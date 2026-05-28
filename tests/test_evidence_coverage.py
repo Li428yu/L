@@ -117,6 +117,33 @@ class EvidenceCoverageTests(unittest.TestCase):
         self.assertTrue(decision["should_refuse"])
         self.assertEqual(decision["reason_code"], "all_final_evidence_weak_or_noise")
 
+    def test_weak_labels_pass_when_relevant_direct_support_is_still_usable(self) -> None:
+        harness = EvidenceCoverageHarness()
+        evidence = [
+            make_evidence(
+                score=1.0,
+                text=(
+                    "The paper identifies important design and training factors for learned "
+                    "representations, including data augmentation composition, nonlinear "
+                    "transformation, batch size, and training steps."
+                ),
+                quality_label="noise",
+            )
+        ]
+
+        decision = harness._evidence_coverage_decision(
+            state={
+                "question": "Which design or training factors are important for learned representations?",
+                "needs_retrieval": True,
+                "evidence": evidence,
+                "evidence_quality": "strong",
+                "evidence_judgments": [{"chunk_id": "chunk-1", "verdict": "direct"}],
+            },
+            prompt_evidence=evidence,
+        )
+
+        self.assertFalse(decision["should_refuse"])
+
     def test_multi_document_incomplete_coverage_refuses(self) -> None:
         harness = EvidenceCoverageHarness()
         evidence = [make_evidence()]

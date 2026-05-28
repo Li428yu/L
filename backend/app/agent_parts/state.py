@@ -43,6 +43,8 @@ class PaperAgentState(TypedDict, total=False):
     document_relation_map: list[dict[str, Any]]
     multi_document_coverage: dict[str, Any]
     visual_ocr_warnings: list[dict[str, Any]]
+    agent_calls: list[dict[str, Any]]
+    active_agent: str
 
 
 @dataclass

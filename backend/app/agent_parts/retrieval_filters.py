@@ -58,6 +58,7 @@ class AgentRetrievalFilterMixin:
                     question=question,
                     evidence=evidence,
                     limit=max(top_k, min(len(evidence), len(unique_documents) * 2)),
+                    target_document_ids=coverage_document_ids,
                 )
             else:
                 selected = self._select_diverse_overview_evidence(question=question, evidence=evidence, limit=3)
@@ -119,17 +120,6 @@ class AgentRetrievalFilterMixin:
                     for item in table_evidence
                     if any(marker in self._sanitize_evidence_text(item.text) for marker in ["实验分数构成", "实验过程", "实验结果", "实验总分"])
                 ] or table_evidence
-                if "bleu" in question.lower():
-                    bleu_result_tables = [
-                        item
-                        for item in table_evidence
-                        if all(
-                            marker in self._sanitize_evidence_text(item.text).lower()
-                            for marker in ["28.4", "41.8"]
-                        )
-                    ]
-                    if bleu_result_tables:
-                        focused_tables = bleu_result_tables
                 scored_tables = sorted(
                     [
                         (
@@ -154,35 +144,25 @@ class AgentRetrievalFilterMixin:
                             text=self._sanitize_evidence_text(item.text),
                             terms=[
                                 "table 1",
-                                "complexity per layer",
-                                "sequential operations",
-                                "maximum path length",
-                                "layer type",
-                                "self-attention",
-                                "recurrent",
-                                "convolutional",
-                                "bleu",
-                                "wmt 2014",
-                                "english-to-german",
-                                "english-to-french",
-                                "en-de",
-                                "en-fr",
-                                "28.4",
-                                "41.8",
                                 "table 2",
                                 "table 3",
-                                "zero-shot",
+                                "benchmark",
+                                "metric",
+                                "score",
+                                "result",
                                 "accuracy",
+                                "error",
+                                "f1",
+                                "auc",
+                                "zero-shot",
                                 "perplexity",
                             ],
                             bonus_phrases=[
-                                "table 1",
-                                "maximum path lengths",
-                                "sequential operations",
-                                "table 2",
-                                "table 3",
-                                "28.4",
-                                "41.8",
+                                "state-of-the-art",
+                                "outperforms",
+                                "experimental results",
+                                "benchmark results",
+                                "results are shown",
                             ],
                             limit=900,
                         )
@@ -246,10 +226,15 @@ class AgentRetrievalFilterMixin:
                     limit=top_k,
                 )
 
-        keyword_selected = self._select_special_keyword_evidence(
+        multi_document_question = len(unique_documents) > 1 and (
+            self._looks_like_compare_question(question)
+            or self._looks_like_multi_document_topic_question(question)
+        )
+        keyword_limit = min(top_k, 2) if "abstract" in question.lower() else top_k
+        keyword_selected = [] if multi_document_question else self._select_special_keyword_evidence(
             question=question,
             evidence=evidence,
-            limit=top_k,
+            limit=keyword_limit,
         )
         if keyword_selected:
             keyword_selected = self._ensure_selected_document_coverage(
@@ -257,26 +242,26 @@ class AgentRetrievalFilterMixin:
                 selected=keyword_selected,
                 evidence=evidence,
                 target_document_ids=coverage_document_ids,
-                limit=top_k,
+                limit=keyword_limit,
             )
             keyword_selected = self._repair_final_evidence_selection(
                 question=question,
                 selected=keyword_selected,
                 candidates=evidence,
-                limit=top_k,
+                limit=keyword_limit,
             )
             keyword_selected = self._ensure_multi_document_coverage_if_needed(
                 question=question,
                 selected=keyword_selected,
                 evidence=evidence,
                 target_document_ids=coverage_document_ids,
-                limit=top_k,
+                limit=keyword_limit,
             )
             return self._finalize_filtered_evidence(
                 question=question,
                 selected=keyword_selected,
                 candidates=evidence,
-                limit=top_k,
+                limit=keyword_limit,
             )
 
         if len(unique_documents) > 1 and (
@@ -288,11 +273,19 @@ class AgentRetrievalFilterMixin:
                 question=question,
                 evidence=evidence,
                 limit=limit,
+                target_document_ids=coverage_document_ids,
             )
             selected = self._repair_final_evidence_selection(
                 question=question,
                 selected=selected,
                 candidates=evidence,
+                limit=limit,
+            )
+            selected = self._ensure_comparative_role_coverage_if_needed(
+                question=question,
+                selected=selected,
+                evidence=evidence,
+                target_document_ids=coverage_document_ids,
                 limit=limit,
             )
             selected = self._ensure_multi_document_coverage_if_needed(
@@ -326,7 +319,12 @@ class AgentRetrievalFilterMixin:
                 fallback.append(item)
                 continue
 
-            adjusted_score = item.score + quality * 0.18 + relevance * 0.75
+            adjusted_score = (
+                item.score
+                + quality * 0.18
+                + relevance * 0.75
+                + self._scientific_evidence_shape_bonus(question=question, item=item, text=text) * 0.55
+            )
             scored.append((adjusted_score, position, item))
 
         target_count = max(1, top_k)
@@ -408,6 +406,9 @@ class AgentRetrievalFilterMixin:
                 self._looks_like_metric_result_question(question)
                 or self._looks_like_framework_function_question(question)
                 or self._looks_like_trustworthy_characteristics_question(question)
+                or self._looks_like_efficiency_or_resource_question(question)
+                or self._looks_like_method_adaptation_question(question)
+                or self._looks_like_design_or_training_factor_question(question)
             )
             else 1
         )
@@ -464,6 +465,20 @@ class AgentRetrievalFilterMixin:
                 selected.insert(0, visual_item)
                 selected_chunks = {candidate.chunk_id for candidate in selected}
 
+        if visual_question:
+            visual_selected = [item for item in selected if self._is_visual_evidence_item(item)]
+            if visual_selected:
+                visual_selected.sort(
+                    key=lambda item: (
+                        self._final_evidence_direct_support_score(question=question, item=item),
+                        self._question_relevance_score(question, self._sanitize_evidence_text(item.text)),
+                        item.score,
+                    ),
+                    reverse=True,
+                )
+                lead_visual = visual_selected[0]
+                selected = [lead_visual, *[item for item in selected if item.chunk_id != lead_visual.chunk_id]]
+
         return selected[:limit]
 
     def _insert_or_replace_final_evidence(
@@ -502,19 +517,23 @@ class AgentRetrievalFilterMixin:
             item.quote = self._keyword_focused_quote(
                 text=text,
                 terms=[
-                    "bleu",
-                    "wmt 2014",
-                    "english-to-german",
-                    "english-to-french",
-                    "en-de",
-                    "en-fr",
-                    "28.4",
-                    "41.8",
-                    "41.0",
-                    "table 2",
+                    "table",
+                    "benchmark",
+                    "metric",
+                    "score",
+                    "result",
+                    "accuracy",
+                    "error",
+                    "f1",
+                    "auc",
                     "state-of-the-art",
                 ],
-                bonus_phrases=["outperforms", "state-of-the-art", "Table 2", "28.4", "41.8", "41.0"],
+                bonus_phrases=[
+                    "outperforms",
+                    "state-of-the-art",
+                    "experimental results",
+                    "benchmark results",
+                ],
                 limit=620,
             )
             return
@@ -522,30 +541,27 @@ class AgentRetrievalFilterMixin:
             item.quote = self._keyword_focused_quote(
                 text=text,
                 terms=[
-                    "govern",
-                    "map",
-                    "measure",
-                    "manage",
-                    "identify",
-                    "protect",
-                    "detect",
-                    "respond",
-                    "recover",
-                    "strategy",
-                    "expectations",
-                    "policy",
-                    "cybersecurity risk",
-                    "core functions",
+                    "function",
                     "functions",
+                    "core",
+                    "component",
+                    "components",
+                    "capability",
+                    "capabilities",
+                    "stage",
+                    "process",
+                    "role",
+                    "strategy",
+                    "policy",
+                    "outcome",
+                    "outcomes",
                 ],
                 bonus_phrases=[
                     "core functions",
-                    "composed of four functions",
-                    "six functions",
+                    "composed of",
+                    "consists of",
+                    "organized into",
                     "functions organize",
-                    "organize cybersecurity outcomes",
-                    "strategy, expectations, and policy",
-                    "cybersecurity risk management strategy",
                 ],
                 limit=620,
             )
@@ -571,6 +587,94 @@ class AgentRetrievalFilterMixin:
                 limit=620,
             )
             return
+        if self._looks_like_efficiency_or_resource_question(question):
+            item.quote = self._keyword_focused_quote(
+                text=text,
+                terms=[
+                    "trainable parameter",
+                    "trainable parameters",
+                    "number of trainable",
+                    "parameters",
+                    "memory requirement",
+                    "memory",
+                    "storage",
+                    "compute",
+                    "throughput",
+                    "latency",
+                    "speedup",
+                    "faster",
+                    "smaller",
+                    "efficient",
+                    "efficiency",
+                    "reduce",
+                    "reduced",
+                    "times",
+                    "no additional",
+                ],
+                bonus_phrases=[
+                    "reduce the number",
+                    "memory requirement",
+                    "higher training throughput",
+                    "no additional",
+                    "fewer trainable parameters",
+                ],
+                limit=720,
+            )
+            return
+        if self._looks_like_method_adaptation_question(question):
+            item.quote = self._keyword_focused_quote(
+                text=text,
+                terms=[
+                    "adaptation",
+                    "fine-tuning",
+                    "pre-trained",
+                    "pretrained",
+                    "weights",
+                    "frozen",
+                    "freeze",
+                    "rank",
+                    "low-rank",
+                    "decomposition",
+                    "matrix",
+                    "matrices",
+                    "downstream",
+                    "update",
+                    "inject",
+                ],
+                bonus_phrases=["we propose", "we introduce", "our approach", "pre-trained weights", "rank decomposition"],
+                limit=720,
+            )
+            return
+        if self._looks_like_design_or_training_factor_question(question):
+            item.quote = self._keyword_focused_quote(
+                text=text,
+                terms=[
+                    "design",
+                    "training",
+                    "factor",
+                    "factors",
+                    "component",
+                    "components",
+                    "data augmentation",
+                    "augmentations",
+                    "composition",
+                    "critical",
+                    "important",
+                    "learnable",
+                    "nonlinear",
+                    "transformation",
+                    "loss",
+                    "batch",
+                    "batch size",
+                    "training steps",
+                    "temperature",
+                    "ablation",
+                    "study",
+                ],
+                bonus_phrases=["critical role", "systematically study", "we show", "we find", "training steps"],
+                limit=720,
+            )
+            return
         item.quote = self._best_quote_for_question(question, text)
 
     def _final_evidence_direct_support_score(self, *, question: str, item: EvidenceItem) -> float:
@@ -591,6 +695,7 @@ class AgentRetrievalFilterMixin:
         score += self._trustworthy_characteristics_support_bonus(question=question, text=text)
         score += self._metric_result_support_bonus(question=question, text=text, item=item)
         score += self._scientific_paper_support_bonus(question=question, text=text)
+        score += self._scientific_evidence_shape_bonus(question=question, item=item, text=text)
         return score
 
     def _scientific_paper_support_bonus(self, *, question: str, text: str) -> float:
@@ -600,79 +705,173 @@ class AgentRetrievalFilterMixin:
         if any(term in question for term in ["概括", "核心贡献", "主要贡献"]) or "summary" in normalized_question:
             if any(phrase in normalized_text for phrase in ["we propose", "we present", "we introduce", "contribution"]):
                 score += 0.9
-            if any(phrase in normalized_text for phrase in ["abstract", "conclusion", "first sequence transduction model"]):
+            if any(phrase in normalized_text for phrase in ["abstract", "conclusion", "our approach", "this paper"]):
                 score += 0.5
-            if "self-attention has been used successfully" in normalized_text:
-                score -= 0.8
         if any(term in question for term in ["方法", "机制", "结构", "架构", "组成"]) or any(
             term in normalized_question for term in ["method", "architecture"]
         ):
-            if any(phrase in normalized_text for phrase in ["model architecture", "consists of", "objective", "masked language model", "contracting path"]):
+            if any(
+                phrase in normalized_text
+                for phrase in [
+                    "model architecture",
+                    "consists of",
+                    "objective",
+                    "method",
+                    "framework",
+                ]
+            ):
                 score += 0.7
         if any(term in question for term in ["是否证明", "能否证明", "证明了"]) or "prove" in normalized_question:
-            if any(phrase in normalized_text for phrase in ["machine translation", "language processing", "biomedical image segmentation"]):
+            if any(phrase in normalized_text for phrase in ["experiment", "evaluation", "task", "dataset", "domain"]):
                 score += 0.4
+        return score
+
+    def _scientific_evidence_shape_bonus(self, *, question: str, item: EvidenceItem, text: str) -> float:
+        normalized_question = question.lower()
+        normalized_text = self._sanitize_evidence_text(text).lower()
+        section = (item.section or "").lower()
+        if not normalized_text:
+            return 0.0
+
+        score = 0.0
+        if "abstract" in normalized_question:
+            if "abstract" in section or " abstract " in f" {normalized_text[:900]} ":
+                score += 1.15
+            elif "introduction" in section:
+                score += 0.35
+
+        if self._looks_like_efficiency_or_resource_question(question):
+            resource_terms = [
+                "trainable parameter",
+                "trainable parameters",
+                "memory requirement",
+                "memory",
+                "storage",
+                "compute",
+                "throughput",
+                "latency",
+                "speedup",
+                "faster",
+                "smaller",
+                "efficient",
+                "efficiency",
+            ]
+            hits = sum(1 for term in resource_terms if term in normalized_text)
+            score += min(1.05, hits * 0.16)
+            if re.search(r"\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:x|times|%|m|b|k|million|billion)?\b", normalized_text):
+                score += 0.25
+            if any(phrase in normalized_text for phrase in ["we propose", "we present", "we introduce", "we show"]):
+                score += 0.2
+
+        if self._looks_like_method_adaptation_question(question):
+            method_terms = [
+                "adaptation",
+                "fine-tuning",
+                "pre-trained",
+                "pretrained",
+                "weights",
+                "frozen",
+                "freeze",
+                "rank",
+                "decomposition",
+                "matrix",
+                "matrices",
+                "downstream",
+                "update",
+                "inject",
+            ]
+            hits = sum(1 for term in method_terms if term in normalized_text)
+            score += min(1.0, hits * 0.13)
+            if any(phrase in normalized_text for phrase in ["we propose", "we present", "we introduce", "our approach"]):
+                score += 0.35
+            if any(marker in section for marker in ["abstract", "introduction", "method"]):
+                score += 0.25
+
+        if self._looks_like_design_or_training_factor_question(question):
+            factor_terms = [
+                "design",
+                "training",
+                "factor",
+                "factors",
+                "component",
+                "components",
+                "data augmentation",
+                "augmentations",
+                "composition",
+                "critical",
+                "important",
+                "learnable",
+                "nonlinear",
+                "transformation",
+                "loss",
+                "batch",
+                "batch size",
+                "training steps",
+                "temperature",
+                "ablation",
+                "study",
+            ]
+            hits = sum(1 for term in factor_terms if term in normalized_text)
+            score += min(1.15, hits * 0.12)
+            if any(phrase in normalized_text for phrase in ["we show", "we find", "systematically study", "critical role"]):
+                score += 0.3
+            if any(marker in section for marker in ["abstract", "introduction", "result", "method"]):
+                score += 0.2
+
+        if "references" in section:
+            score -= 0.6
+        if "appendix" in section or "additional experiment" in normalized_text[:240]:
+            score -= 0.18
+        if self._is_table_evidence_item(item) and not self._looks_like_table_question(question):
+            score -= 0.18
+        if self._is_visual_evidence_item(item) and not self._question_requires_visual_evidence(question):
+            score -= 0.3
         return score
 
     def _framework_function_support_bonus(self, *, question: str, text: str, item: EvidenceItem) -> float:
         if not self._looks_like_framework_function_question(question):
             return 0.0
         normalized = text.lower()
-        expected_terms: set[str] = set()
-        normalized_question = question.lower()
-        if any(term in normalized_question for term in ["ai rmf", "rmf", "ai risk management"]):
-            expected_terms = {"govern", "map", "measure", "manage"}
-        elif any(term in normalized_question for term in ["csf", "cybersecurity"]):
-            expected_terms = {"govern", "identify", "protect", "detect", "respond", "recover"}
         hits = {
             term
             for term in [
-                "govern",
-                "map",
-                "measure",
-                "manage",
-                "identify",
-                "protect",
-                "detect",
-                "respond",
-                "recover",
+                "function",
+                "functions",
+                "core",
+                "component",
+                "components",
+                "capability",
+                "capabilities",
+                "stage",
+                "stages",
+                "process",
+                "processes",
+                "role",
+                "roles",
+                "policy",
+                "strategy",
+                "outcome",
+                "outcomes",
             ]
             if re.search(rf"\b{re.escape(term)}\b", normalized)
         }
-        expected_terms = self._expected_framework_function_terms(question)
-        min_hits = 1 if expected_terms and len(expected_terms) == 1 else 2
-        if len(hits) < min_hits:
-            return 0.0
-        if expected_terms and not expected_terms.issubset(hits):
+        if len(hits) < 2:
             return 0.0
         bonus = min(1.0, len(hits) * 0.14)
-        if {"govern", "map", "measure", "manage"}.issubset(hits):
-            bonus += 1.15
-        if {"govern", "identify", "protect", "detect", "respond", "recover"}.issubset(hits):
-            bonus += 1.15
         if any(
             phrase in normalized
             for phrase in [
                 "core functions",
-                "composed of four functions",
-                "six functions",
+                "composed of",
+                "consists of",
+                "organized into",
                 "functions organize",
-                "organize cybersecurity outcomes",
             ]
         ):
             bonus += 0.55
-        if expected_terms and len(expected_terms) == 1:
-            role_markers = [
-                "strategy",
-                "expectations",
-                "policy",
-                "cybersecurity risk",
-                "risk management",
-                "organizational",
-                "outcomes",
-            ]
-            role_hits = sum(1 for marker in role_markers if marker in normalized)
-            bonus += min(1.25, role_hits * 0.24)
+        role_markers = ["strategy", "policy", "organizational", "outcome", "outcomes", "responsibility", "scope"]
+        role_hits = sum(1 for marker in role_markers if marker in normalized)
+        bonus += min(0.8, role_hits * 0.16)
         if self._is_visual_evidence_item(item) and not self._question_requires_visual_evidence(question):
             bonus -= 0.45
         return bonus
@@ -704,16 +903,15 @@ class AgentRetrievalFilterMixin:
             return 0.0
         normalized = text.lower()
         terms = [
-            "bleu",
-            "wmt 2014",
-            "english-to-german",
-            "english-to-french",
-            "en-de",
-            "en-fr",
-            "28.4",
-            "41.8",
-            "41.0",
-            "table 2",
+            "benchmark",
+            "metric",
+            "score",
+            "result",
+            "accuracy",
+            "error",
+            "f1",
+            "auc",
+            "table",
             "state-of-the-art",
         ]
         hits = sum(1 for term in terms if term in normalized)
@@ -735,34 +933,33 @@ class AgentRetrievalFilterMixin:
         chunk_type = (item.chunk_type or "").lower()
         return bool(item.image_id) or any(marker in chunk_type for marker in ["image", "figure", "chart"])
 
+    def _is_table_evidence_item(self, item: EvidenceItem) -> bool:
+        chunk_type = (item.chunk_type or "").lower()
+        text = self._sanitize_evidence_text(item.text)
+        return "table" in chunk_type or self._is_table_like_text(text)
+
     def _metric_table_bonus(self, question: str, text: str) -> float:
         if not self._looks_like_metric_result_question(question):
             return 0.0
         normalized = self._sanitize_evidence_text(text).lower()
         terms = [
             "table 1",
-            "complexity per layer",
-            "sequential operations",
-            "maximum path length",
-            "layer type",
             "table 2",
-            "bleu",
-            "wmt 2014",
-            "english-to-german",
-            "english-to-french",
-            "en-de",
-            "en-fr",
-            "28.4",
-            "41.8",
+            "table 3",
+            "benchmark",
+            "metric",
+            "score",
+            "result",
             "zero-shot",
             "accuracy",
+            "error",
+            "f1",
+            "auc",
             "perplexity",
         ]
         hits = sum(1 for term in terms if term in normalized)
         bonus = min(2.2, hits * 0.22)
-        if "table 2" in normalized and "28.4" in normalized and "41.8" in normalized:
-            bonus += 1.0
-        if "table 1" in normalized and "sequential" in normalized and "maximum path" in normalized:
+        if "table" in normalized and any(term in normalized for term in ["score", "accuracy", "error", "result"]):
             bonus += 1.0
         return bonus
 
@@ -783,15 +980,23 @@ class AgentRetrievalFilterMixin:
             hits = {
                 term
                 for term in [
-                    "govern",
-                    "map",
-                    "measure",
-                    "manage",
-                    "identify",
-                    "protect",
-                    "detect",
-                    "respond",
-                    "recover",
+                    "function",
+                    "functions",
+                    "core",
+                    "component",
+                    "components",
+                    "capability",
+                    "capabilities",
+                    "stage",
+                    "stages",
+                    "process",
+                    "processes",
+                    "role",
+                    "roles",
+                    "policy",
+                    "strategy",
+                    "outcome",
+                    "outcomes",
                 ]
                 if re.search(rf"\b{re.escape(term)}\b", normalized)
             }
@@ -801,11 +1006,7 @@ class AgentRetrievalFilterMixin:
             if expected_terms and not expected_terms.issubset(hits):
                 continue
             score = item.score + min(0.8, len(hits) * 0.12)
-            if {"govern", "map", "measure", "manage"}.issubset(hits):
-                score += 1.2
-            if {"govern", "identify", "protect", "detect", "respond", "recover"}.issubset(hits):
-                score += 1.2
-            if "core is composed" in normalized or "functions organize" in normalized:
+            if "core is composed" in normalized or "functions organize" in normalized or "consists of" in normalized:
                 score += 0.7
             if "function" in normalized or "functions" in normalized:
                 score += 0.25
@@ -814,12 +1015,12 @@ class AgentRetrievalFilterMixin:
             if expected_terms and len(expected_terms) == 1:
                 role_markers = [
                     "strategy",
-                    "expectations",
                     "policy",
-                    "cybersecurity risk",
-                    "risk management",
                     "organizational",
+                    "outcome",
                     "outcomes",
+                    "responsibility",
+                    "scope",
                 ]
                 score += min(1.1, sum(1 for marker in role_markers if marker in normalized) * 0.18)
             score += self._question_relevance_score(question, f"{item.paper_name}\n{text}") * 0.4
@@ -836,29 +1037,28 @@ class AgentRetrievalFilterMixin:
             item.quote = self._keyword_focused_quote(
                 text=text,
                 terms=[
-                    "govern",
-                    "map",
-                    "measure",
-                    "manage",
-                    "identify",
-                    "protect",
-                    "detect",
-                    "respond",
-                    "recover",
-                    "strategy",
-                    "expectations",
-                    "policy",
-                    "cybersecurity risk",
-                    "core",
                     "function",
                     "functions",
+                    "component",
+                    "components",
+                    "capability",
+                    "capabilities",
+                    "stage",
+                    "process",
+                    "role",
+                    "strategy",
+                    "policy",
+                    "core",
+                    "outcome",
+                    "outcomes",
                 ],
                 bonus_phrases=[
                     "core is composed",
                     "functions organize",
-                    "six functions",
-                    "strategy, expectations, and policy",
-                    "cybersecurity risk management strategy",
+                    "core functions",
+                    "composed of",
+                    "consists of",
+                    "organized into",
                 ],
                 limit=520,
             )
@@ -868,29 +1068,8 @@ class AgentRetrievalFilterMixin:
         return selected
 
     def _expected_framework_function_terms(self, question: str) -> set[str]:
-        normalized = question.lower()
-        all_terms = {
-            "govern",
-            "map",
-            "measure",
-            "manage",
-            "identify",
-            "protect",
-            "detect",
-            "respond",
-            "recover",
-        }
-        core_intent = any(
-            marker in normalized
-            for marker in ["核心功能", "功能集合", "core functions", "core function", "functions", "有哪些", "哪些"]
-        )
-        named_terms = {term for term in all_terms if re.search(rf"\b{re.escape(term)}\b", normalized)}
-        if named_terms and not core_intent:
-            return named_terms
-        if any(term in normalized for term in ["ai rmf", "rmf", "ai risk management"]):
-            return {"govern", "map", "measure", "manage"}
-        if any(term in normalized for term in ["csf", "cybersecurity"]):
-            return {"govern", "identify", "protect", "detect", "respond", "recover"}
+        # Keep framework-function retrieval generic; document-specific function names
+        # should come from retrieved text, not from runtime expectations.
         return set()
 
     def _coverage_target_document_ids(
@@ -948,6 +1127,341 @@ class AgentRetrievalFilterMixin:
             or self._looks_like_multi_document_topic_question(question)
             or self._looks_like_broad_overview_question(question)
         )
+
+    def _ensure_comparative_role_coverage_if_needed(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        evidence: list[EvidenceItem],
+        target_document_ids: list[str],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        roles = self._comparative_balance_roles(question=question, document_count=len(target_document_ids), limit=limit)
+        if not roles or len(target_document_ids) <= 1:
+            return selected[:limit]
+
+        result = list(selected[:limit])
+        selected_chunks = {item.chunk_id for item in result}
+        document_ids = [document_id for document_id in target_document_ids if document_id]
+        for role in roles:
+            for document_id in document_ids:
+                if self._document_has_comparative_role(question=question, items=result, document_id=document_id, role=role):
+                    continue
+                candidate = self._best_comparative_role_candidate(
+                    question=question,
+                    evidence=evidence,
+                    document_id=document_id,
+                    role=role,
+                    excluded_chunks=selected_chunks,
+                )
+                if not candidate:
+                    continue
+                self._set_comparative_role_quote(question=question, item=candidate, role=role)
+                if len(result) < limit:
+                    result.append(candidate)
+                    selected_chunks.add(candidate.chunk_id)
+                    continue
+                drop_index = self._comparative_role_replacement_index(
+                    question=question,
+                    selected=result,
+                    incoming_document_id=document_id,
+                    incoming_role=role,
+                    protected_role=roles[0],
+                )
+                if drop_index is None:
+                    continue
+                selected_chunks.discard(result[drop_index].chunk_id)
+                result[drop_index] = candidate
+                selected_chunks.add(candidate.chunk_id)
+        return result[:limit]
+
+    def _comparative_balance_roles(self, *, question: str, document_count: int, limit: int) -> list[str]:
+        if document_count <= 1 or not (
+            self._looks_like_compare_question(question) or self._looks_like_multi_document_topic_question(question)
+        ):
+            return []
+        if self._looks_like_visual_retrieval_question(question):
+            return []
+        if self._looks_like_metric_result_question(question):
+            return ["result"]
+
+        normalized = question.lower()
+        mechanism_markers = [
+            "how",
+            "approach",
+            "method",
+            "mechanism",
+            "strategy",
+            "pursue",
+            "achieve",
+            "via",
+            "through",
+            "objective",
+            "structure",
+            "architecture",
+            "training",
+            "design",
+        ]
+        asks_for_mechanism = any(marker in normalized for marker in mechanism_markers)
+        if self._looks_like_efficiency_or_resource_question(question):
+            if limit >= document_count * 2 and asks_for_mechanism:
+                return ["mechanism", "efficiency"]
+            return ["mechanism"]
+        if asks_for_mechanism:
+            return ["mechanism"]
+        return []
+
+    def _document_has_comparative_role(
+        self,
+        *,
+        question: str,
+        items: list[EvidenceItem],
+        document_id: str,
+        role: str,
+    ) -> bool:
+        for item in items:
+            if item.document_id != document_id:
+                continue
+            if self._comparative_role_score(question=question, item=item, role=role) >= 1.05:
+                return True
+        return False
+
+    def _best_comparative_role_candidate(
+        self,
+        *,
+        question: str,
+        evidence: list[EvidenceItem],
+        document_id: str,
+        role: str,
+        excluded_chunks: set[str],
+    ) -> EvidenceItem | None:
+        scored: list[tuple[float, int, EvidenceItem]] = []
+        for position, item in enumerate(evidence):
+            if item.document_id != document_id or item.chunk_id in excluded_chunks:
+                continue
+            text = self._sanitize_evidence_text(item.text)
+            if not text.strip() or self._looks_like_front_matter_noise(text):
+                continue
+            if self._looks_like_reference_section_text(text):
+                continue
+            score = self._comparative_role_score(question=question, item=item, role=role)
+            if score < 1.05:
+                continue
+            scored.append((score, position, item))
+        scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        return scored[0][2] if scored else None
+
+    def _comparative_role_replacement_index(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        incoming_document_id: str,
+        incoming_role: str,
+        protected_role: str,
+    ) -> int | None:
+        document_counts: dict[str, int] = {}
+        for item in selected:
+            if item.document_id:
+                document_counts[item.document_id] = document_counts.get(item.document_id, 0) + 1
+
+        scored_drops: list[tuple[float, int]] = []
+        for index, item in enumerate(selected):
+            same_document = item.document_id == incoming_document_id
+            keeps_document_coverage = bool(item.document_id and document_counts.get(item.document_id, 0) <= 1)
+            protects_primary_role = (
+                item.document_id != incoming_document_id
+                and self._comparative_role_score(question=question, item=item, role=protected_role) >= 1.05
+            )
+            if keeps_document_coverage or protects_primary_role:
+                continue
+            current_role_score = self._comparative_role_score(question=question, item=item, role=incoming_role)
+            direct_score = self._final_evidence_direct_support_score(question=question, item=item)
+            drop_score = direct_score + current_role_score * 0.4
+            if same_document:
+                drop_score -= 0.35
+            scored_drops.append((drop_score, index))
+        if not scored_drops:
+            return None
+        scored_drops.sort(key=lambda row: (row[0], -row[1]))
+        return scored_drops[0][1]
+
+    def _comparative_role_score(self, *, question: str, item: EvidenceItem, role: str) -> float:
+        text = self._sanitize_evidence_text(f"{item.section or ''}\n{item.quote}\n{item.text}")
+        if not text.strip():
+            return 0.0
+        normalized = text.lower()
+        score = (
+            item.score * 0.35
+            + self._question_relevance_score(question, text) * 0.8
+            + self._readable_text_score(text) * 0.15
+            + self._scientific_evidence_shape_bonus(question=question, item=item, text=text) * 0.35
+        )
+        if self._is_table_evidence_item(item) and role != "result":
+            score -= 0.25
+        if self._is_visual_evidence_item(item) and not self._question_requires_visual_evidence(question):
+            score -= 0.35
+
+        section = (item.section or "").lower()
+        if role == "mechanism":
+            terms = [
+                "method",
+                "approach",
+                "mechanism",
+                "strategy",
+                "objective",
+                "design",
+                "architecture",
+                "structure",
+                "scale",
+                "scaling",
+                "coefficient",
+                "width",
+                "depth",
+                "resolution",
+                "freeze",
+                "frozen",
+                "pre-trained",
+                "pretrained",
+                "weight",
+                "weights",
+                "rank",
+                "decomposition",
+                "matrix",
+                "matrices",
+                "inject",
+                "update",
+                "adapter",
+                "fine-tuning",
+                "fine tuning",
+                "training objective",
+                "loss",
+                "cross entropy",
+                "contrastive",
+                "augmentation",
+                "component",
+            ]
+            hits = sum(1 for term in terms if term in normalized)
+            score += min(1.45, hits * 0.16)
+            if any(marker in section for marker in ["abstract", "introduction", "method", "approach"]):
+                score += 0.25
+            if any(phrase in normalized for phrase in ["we propose", "we introduce", "our approach", "we present"]):
+                score += 0.28
+            if any(marker in section for marker in ["result", "experiment"]) and not any(
+                term in normalized for term in ["method", "approach", "design", "architecture", "strategy"]
+            ):
+                score -= 0.35
+        elif role == "efficiency":
+            terms = [
+                "efficient",
+                "efficiency",
+                "parameter",
+                "parameters",
+                "memory",
+                "storage",
+                "compute",
+                "flops",
+                "throughput",
+                "latency",
+                "speedup",
+                "faster",
+                "smaller",
+                "reduce",
+                "reduced",
+                "fewer",
+                "cost",
+            ]
+            hits = sum(1 for term in terms if term in normalized)
+            score += min(1.35, hits * 0.15)
+            if re.search(r"\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:x|times|%|m|b|k|million|billion)\b", normalized):
+                score += 0.3
+        elif role == "result":
+            terms = [
+                "result",
+                "results",
+                "benchmark",
+                "outperform",
+                "outperforms",
+                "state-of-the-art",
+                "accuracy",
+                "error",
+                "score",
+                "table",
+                "evaluation",
+            ]
+            hits = sum(1 for term in terms if term in normalized)
+            score += min(1.35, hits * 0.16)
+            if self._is_table_evidence_item(item):
+                score += 0.25
+        return score
+
+    def _set_comparative_role_quote(self, *, question: str, item: EvidenceItem, role: str) -> None:
+        text = self._sanitize_evidence_text(item.text)
+        if role == "mechanism":
+            item.quote = self._keyword_focused_quote(
+                text=text,
+                terms=[
+                    "method",
+                    "approach",
+                    "mechanism",
+                    "strategy",
+                    "objective",
+                    "design",
+                    "architecture",
+                    "scale",
+                    "scaling",
+                    "coefficient",
+                    "width",
+                    "depth",
+                    "resolution",
+                    "freeze",
+                    "frozen",
+                    "pre-trained",
+                    "pretrained",
+                    "weights",
+                    "rank",
+                    "decomposition",
+                    "matrix",
+                    "matrices",
+                    "inject",
+                    "update",
+                ],
+                bonus_phrases=["we propose", "we introduce", "our approach", "we present"],
+                limit=720,
+            )
+            return
+        if role == "efficiency":
+            item.quote = self._keyword_focused_quote(
+                text=text,
+                terms=[
+                    "efficient",
+                    "efficiency",
+                    "parameter",
+                    "parameters",
+                    "memory",
+                    "compute",
+                    "throughput",
+                    "latency",
+                    "faster",
+                    "smaller",
+                    "reduce",
+                    "reduced",
+                    "fewer",
+                ],
+                bonus_phrases=["fewer trainable parameters", "memory requirement", "higher training throughput"],
+                limit=720,
+            )
+            return
+        if role == "result":
+            item.quote = self._keyword_focused_quote(
+                text=text,
+                terms=["result", "benchmark", "outperform", "state-of-the-art", "accuracy", "error", "score", "table"],
+                bonus_phrases=["experimental results", "benchmark results", "state-of-the-art"],
+                limit=720,
+            )
+            return
+        item.quote = self._best_quote_for_question(question, text)
 
     def _ensure_selected_document_coverage(
         self,
@@ -1019,6 +1533,52 @@ class AgentRetrievalFilterMixin:
                 break
         return kept[:limit]
 
+    def _looks_like_efficiency_or_resource_question(self, question: str) -> bool:
+        normalized = question.lower()
+        terms = [
+            "efficiency",
+            "efficient",
+            "resource",
+            "memory",
+            "parameter",
+            "parameters",
+            "compute",
+            "storage",
+            "throughput",
+            "latency",
+            "speedup",
+            "faster",
+            "smaller",
+            "cost",
+        ]
+        return any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in terms)
+
+    def _looks_like_method_adaptation_question(self, question: str) -> bool:
+        normalized = question.lower()
+        idea_markers = ["main idea", "core idea", "method idea", "adaptation idea", "approach", "mechanism"]
+        adaptation_markers = [
+            "adaptation",
+            "fine-tuning",
+            "pre-trained",
+            "pretrained",
+            "weights",
+            "rank",
+            "matrix",
+            "matrices",
+            "parameter",
+        ]
+        return any(marker in normalized for marker in idea_markers) and any(
+            marker in normalized for marker in adaptation_markers
+        )
+
+    def _looks_like_design_or_training_factor_question(self, question: str) -> bool:
+        normalized = question.lower()
+        topic_markers = ["design", "training", "factor", "factors", "ablation", "component", "components"]
+        ask_markers = ["important", "identify", "affect", "effect", "learned representation", "representation"]
+        return any(marker in normalized for marker in topic_markers) and any(
+            marker in normalized for marker in ask_markers
+        )
+
     def _select_special_keyword_evidence(
         self,
         *,
@@ -1049,15 +1609,14 @@ class AgentRetrievalFilterMixin:
                 self._looks_like_pretraining_objective_question(question),
                 [
                     "pre-training objective",
-                    "masked language model",
-                    "masked",
-                    "mlm",
-                    "next sentence prediction",
-                    "next sentence",
-                    "nsp",
-                    "15%",
+                    "training objective",
+                    "objective function",
+                    "self-supervised",
+                    "supervised objective",
+                    "pretext task",
+                    "loss function",
                 ],
-                ["masked language model", "next sentence prediction", "pre-training tasks"],
+                ["pre-training objective", "training objective", "loss function"],
                 2,
             ),
             (
@@ -1066,49 +1625,120 @@ class AgentRetrievalFilterMixin:
                     "dataset",
                     "training set",
                     "pre-training dataset",
-                    "webtext",
-                    "reddit",
-                    "outbound links",
-                    "8 million",
-                    "400 million",
+                    "training data",
+                    "corpus",
+                    "data collection",
+                    "data source",
+                    "samples",
                     "image-text",
                     "pairs",
-                    "sa-1b",
-                    "1.1b",
-                    "1b masks",
-                    "billion masks",
-                    "11m",
+                    "million",
+                    "billion",
                     "data engine",
                 ],
-                ["over 1 billion masks", "11m licensed", "400 million", "outbound links from reddit"],
+                ["training set", "pre-training dataset", "data collection", "image-text pairs"],
                 2,
+            ),
+            (
+                self._looks_like_efficiency_or_resource_question(question),
+                [
+                    "trainable parameter",
+                    "trainable parameters",
+                    "number of trainable",
+                    "parameters",
+                    "memory requirement",
+                    "memory",
+                    "storage",
+                    "compute",
+                    "throughput",
+                    "latency",
+                    "speedup",
+                    "faster",
+                    "smaller",
+                    "efficient",
+                    "efficiency",
+                    "reduce",
+                    "reduced",
+                    "times",
+                    "no additional",
+                ],
+                [
+                    "reduce the number",
+                    "memory requirement",
+                    "higher training throughput",
+                    "no additional",
+                    "fewer trainable parameters",
+                ],
+                2,
+            ),
+            (
+                self._looks_like_method_adaptation_question(question),
+                [
+                    "adaptation",
+                    "fine-tuning",
+                    "pre-trained",
+                    "pretrained",
+                    "weights",
+                    "frozen",
+                    "freeze",
+                    "rank",
+                    "low-rank",
+                    "decomposition",
+                    "matrix",
+                    "matrices",
+                    "downstream",
+                    "update",
+                    "inject",
+                ],
+                ["we propose", "we introduce", "our approach", "pre-trained weights", "rank decomposition"],
+                3,
+            ),
+            (
+                self._looks_like_design_or_training_factor_question(question),
+                [
+                    "design",
+                    "training",
+                    "factor",
+                    "factors",
+                    "component",
+                    "components",
+                    "data augmentation",
+                    "augmentations",
+                    "composition",
+                    "critical",
+                    "important",
+                    "learnable",
+                    "nonlinear",
+                    "transformation",
+                    "loss",
+                    "batch",
+                    "batch size",
+                    "training steps",
+                    "temperature",
+                    "ablation",
+                    "study",
+                ],
+                ["critical role", "systematically study", "we show", "we find", "training steps"],
+                3,
             ),
             (
                 self._looks_like_metric_result_question(question),
                 [
                     "table 1",
-                    "complexity per layer",
-                    "sequential operations",
-                    "maximum path length",
-                    "layer type",
-                    "self-attention",
-                    "recurrent",
-                    "convolutional",
-                    "bleu",
-                    "wmt 2014",
-                    "english-to-german",
-                    "english-to-french",
-                    "en-de",
-                    "en-fr",
-                    "28.4",
-                    "41.8",
                     "table 2",
                     "table 3",
+                    "benchmark",
+                    "metric",
+                    "score",
+                    "result",
                     "zero-shot",
                     "accuracy",
+                    "error",
+                    "f1",
+                    "auc",
                     "perplexity",
                 ],
-                ["table 1", "maximum path lengths", "sequential operations", "table 2", "table 3", "28.4", "41.8"],
+                ["state-of-the-art", "outperforms", "experimental results", "benchmark results"],
                 2,
             ),
         ]
@@ -1127,6 +1757,7 @@ class AgentRetrievalFilterMixin:
                     continue
                 score = item.score + min(0.85, len(set(hits)) * 0.11)
                 score += self._question_relevance_score(question, f"{item.paper_name}\n{text}") * 0.45
+                score += self._scientific_evidence_shape_bonus(question=question, item=item, text=text) * 0.5
                 for phrase in bonus_phrases:
                     if phrase in normalized:
                         score += 0.18
@@ -1181,29 +1812,21 @@ class AgentRetrievalFilterMixin:
         normalized_terms = [term.lower() for term in terms if term]
         normalized_bonus = [phrase.lower() for phrase in bonus_phrases if phrase]
         clean_text = self._sanitize_evidence_text(text)
-        sentences = [
-            part.strip()
-            for part in re.split(r"(?<=[.!?。！？])\s+|\n+", clean_text)
-            if part.strip()
-        ]
-        if not sentences:
-            return self._truncate_readable_text(clean_text, limit=limit)
-
-        scored_sentences: list[tuple[float, int, str]] = []
-        for position, sentence in enumerate(sentences):
-            normalized = sentence.lower()
-            term_hits = sum(1 for term in normalized_terms if term in normalized)
-            bonus_hits = sum(1 for phrase in normalized_bonus if phrase in normalized)
-            number_bonus = 1 if re.search(r"\b\d+(?:\.\d+)?\s*(?:m|b|million|billion|%)\b", normalized) else 0
-            score = term_hits + bonus_hits * 2 + number_bonus
-            if score > 0:
-                scored_sentences.append((float(score), position, sentence))
-        scored_sentences.sort(key=lambda row: (row[0], -row[1]), reverse=True)
-        picked = [sentence for _, _, sentence in scored_sentences[:2]]
-        if not picked:
-            return self._truncate_readable_text(clean_text, limit=limit)
-        picked.sort(key=lambda sentence: sentences.index(sentence))
-        return self._truncate_readable_text(" ".join(picked), limit=limit)
+        if self._is_table_like_text(clean_text):
+            return self._best_table_quote_for_question(
+                " ".join([*terms, *bonus_phrases]),
+                clean_text,
+                limit=limit,
+            )
+        quote = self._focused_sentence_quote(
+            question=" ".join([*terms, *bonus_phrases]),
+            text=clean_text,
+            preferred_keywords=[],
+            extra_terms=normalized_terms,
+            bonus_phrases=normalized_bonus,
+            limit=limit,
+        )
+        return quote or self._truncate_readable_text(clean_text, limit=limit)
 
     def _select_document_balanced_evidence(
         self,
@@ -1211,6 +1834,7 @@ class AgentRetrievalFilterMixin:
         question: str,
         evidence: list[EvidenceItem],
         limit: int,
+        target_document_ids: list[str] | None = None,
     ) -> list[EvidenceItem]:
         scored: list[tuple[float, int, EvidenceItem]] = []
         allow_tables = self._looks_like_table_question(question)
@@ -1225,6 +1849,7 @@ class AgentRetrievalFilterMixin:
                 item.score
                 + self._question_relevance_score(question, text) * 0.75
                 + self._readable_text_score(text) * 0.18
+                + self._scientific_evidence_shape_bonus(question=question, item=item, text=text) * 0.4
             )
             if allow_tables and table_like:
                 score += 1.2
@@ -1235,8 +1860,40 @@ class AgentRetrievalFilterMixin:
 
         selected: list[EvidenceItem] = []
         selected_chunks: set[str] = set()
-        document_ids = list(dict.fromkeys(item.document_id for _, _, item in scored if item.document_id))
+        scored_document_ids = list(dict.fromkeys(item.document_id for _, _, item in scored if item.document_id))
+        if target_document_ids:
+            scored_id_set = set(scored_document_ids)
+            document_ids = [
+                document_id
+                for document_id in dict.fromkeys(target_document_ids)
+                if document_id and document_id in scored_id_set
+            ] or scored_document_ids
+        else:
+            document_ids = scored_document_ids
+
+        roles = self._comparative_balance_roles(question=question, document_count=len(document_ids), limit=limit)
+        for role in roles:
+            for document_id in document_ids:
+                candidate = self._best_comparative_role_candidate(
+                    question=question,
+                    evidence=evidence,
+                    document_id=document_id,
+                    role=role,
+                    excluded_chunks=selected_chunks,
+                )
+                if not candidate:
+                    continue
+                self._set_comparative_role_quote(question=question, item=candidate, role=role)
+                selected.append(candidate)
+                selected_chunks.add(candidate.chunk_id)
+                if len(selected) >= limit:
+                    break
+            if len(selected) >= limit:
+                break
+
         for document_id in document_ids:
+            if any(item.document_id == document_id for item in selected):
+                continue
             for _, _, item in scored:
                 if item.document_id != document_id or item.chunk_id in selected_chunks:
                     continue

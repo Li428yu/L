@@ -113,8 +113,12 @@ class AgentAnsweringMixin:
                 runtime_detail="这是字段提取类问题，已只保留用户询问的字段内容，避免作者、单位、日期等相邻信息混入。",
             )
 
-        if not force_model_answer and state.get("needs_retrieval") and self._looks_like_unsupported_proof_question(
-            state["question"]
+        if not force_model_answer and state.get("needs_retrieval") and (
+            self._looks_like_unsupported_proof_question(state["question"])
+            or self._should_decline_cross_scope_proof_question(
+                question=state["question"],
+                evidence=state.get("evidence", []),
+            )
         ):
             answer = self._build_unsupported_proof_refusal_answer(
                 question=state["question"],
@@ -127,20 +131,6 @@ class AgentAnsweringMixin:
                 final_prompt_evidence=final_prompt_evidence,
                 prompt_evidence=compact_model_prompt_evidence,
                 runtime_detail="题目要求证明当前文档范围外的主张，已明确拒绝无证据结论。",
-            )
-
-        local_structured_answer = self._build_local_structured_evidence_answer(
-            question=state["question"],
-            evidence=state.get("evidence", []),
-        )
-        if not force_model_answer and local_structured_answer:
-            return AnswerPlan(
-                mode="local",
-                local_answer=local_structured_answer,
-                answer_strategy="local_structured_evidence_answer",
-                final_prompt_evidence=final_prompt_evidence,
-                prompt_evidence=compact_model_prompt_evidence,
-                runtime_detail="题目命中高置信结构化证据，已直接按原文证据整理答案，避免模型误拒答或漏引。",
             )
 
         coverage_decision = self._evidence_coverage_decision(
@@ -246,6 +236,9 @@ class AgentAnsweringMixin:
             value = float(self._final_evidence_direct_support_score(question=question, item=item) or 0.0)
             value += self._question_relevance_score(question, text) * 0.8
             value += float(item.score or 0.0) * 0.25
+            shape_bonus = getattr(self, "_scientific_evidence_shape_bonus", None)
+            if callable(shape_bonus):
+                value += float(shape_bonus(question=question, item=item, text=text) or 0.0) * 0.7
             if self._is_table_evidence_item(item) and not self._looks_like_metric_result_question(question):
                 value -= 0.8
             if self._is_visual_evidence_item(item) and not self._looks_like_visual_evidence_question(question):
@@ -282,6 +275,7 @@ class AgentAnsweringMixin:
     def _answer_contract_for_question(self, question: str) -> str:
         lines = [
             "中文、简洁；每个关键事实都引用最直接的证据编号。",
+            "中文解释可以意译，但论文关键术语、方法名、指标名和英文短语要尽量保留原文英文，并可放在括号中。",
             "先回答结论，再列 2-5 个“证据要点”；每个要点必须绑定 [E#]。",
             "不要只引用背景证据；数字、任务、模型结构、图表说明必须引用包含该事实的证据。",
         ]
@@ -289,6 +283,10 @@ class AgentAnsweringMixin:
             lines.append("多文档问题必须按文档分别说明，再总结共同点；缺少某篇文档证据时要点名说明。")
         if self._looks_like_metric_result_question(question):
             lines.append("结果/指标问题必须列出具体 benchmark、数值或误差指标，不要只写泛泛表现好。")
+        if self._looks_like_efficiency_or_resource_question(question):
+            lines.append("效率/资源问题如果证据含有明确数值、倍数、参数量、显存、吞吐或延迟变化，必须原样写出这些数值。")
+        if self._looks_like_design_or_training_factor_question(question):
+            lines.append("设计/训练因素问题要逐项列出证据中给出的因素；如果摘要或引言已有因素列表，不要误判为证据不足。")
         if self._looks_like_visual_evidence_question(question):
             lines.append("图表问题必须说明图/表展示对象、结构元素和它支持的结论。")
         if self._looks_like_unsupported_proof_question(question) or any(term in question for term in ["是否证明", "能否证明"]):
@@ -303,302 +301,120 @@ class AgentAnsweringMixin:
     ) -> str:
         if not evidence:
             return ""
-        if self._looks_like_framework_function_question(question):
-            return self._build_local_framework_function_answer(question=question, evidence=evidence)
-        if self._looks_like_trustworthy_characteristics_question(question):
-            return self._build_local_trustworthy_characteristics_answer(question=question, evidence=evidence)
-        if self._looks_like_clip_dataset_scale_question(question):
-            return self._build_local_clip_dataset_scale_answer(question=question, evidence=evidence)
-        if self._looks_like_sam_promptable_visual_question(question):
-            return self._build_local_sam_promptable_visual_answer(question=question, evidence=evidence)
-        if self._looks_like_scanned_cardinal_visual_question(question):
-            return self._build_local_scanned_cardinal_visual_answer(question=question, evidence=evidence)
-        if self._looks_like_transformer_architecture_visual_question(question):
-            return self._build_local_transformer_architecture_visual_answer(question=question, evidence=evidence)
-        if self._looks_like_lifecycle_visual_question(question):
-            return self._build_local_lifecycle_visual_answer(question=question, evidence=evidence)
-        if self._looks_like_transformer_core_question(question):
-            return self._build_local_transformer_core_answer(question=question, evidence=evidence)
-        if self._looks_like_bleu_result_question(question):
-            return self._build_local_bleu_result_answer(question=question, evidence=evidence)
-        return ""
-
-    def _build_local_framework_function_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        expected_terms = self._expected_framework_function_terms(question)
-        normalized_question = question.lower()
-        visual_question = self._question_requires_visual_evidence(question)
-        if visual_question:
-            item = self._best_evidence_item_with_terms(
-                evidence,
-                sorted(expected_terms) if expected_terms else ["govern", "identify", "protect", "detect", "respond", "recover"],
-                prefer_visual=True,
-                require_all=False,
-                min_hits=3,
-            )
-            if item is None or not self._is_visual_evidence_item(item):
-                return ""
-            terms = self._framework_terms_for_answer(expected_terms, normalized_question)
-            return (
-                f"图示把核心功能直接呈现为 {self._format_term_list(terms)}。"
-                f"也就是说，图中用这些功能组织网络安全/AI 风险管理活动，而不是只给出普通背景说明。"
-                f" [{item.citation_id}]"
-            )
-
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            sorted(expected_terms),
-            require_all=True,
-            min_hits=max(1, len(expected_terms)),
+        ranked = sorted(
+            (
+                (self._answer_citation_support_score(question=question, item=item), item)
+                for item in evidence
+            ),
+            key=lambda row: (row[0][0], float(row[1].score or 0.0)),
+            reverse=True,
         )
-        if item is None:
-            return ""
-
-        if {"govern", "map", "measure", "manage"}.issubset(expected_terms):
-            return (
-                f"NIST AI RMF 1.0 的 Core 由四个核心功能组成："
-                f"{self._format_term_list(['GOVERN', 'MAP', 'MEASURE', 'MANAGE'])}。"
-                f"这些 Functions 用来在最高层组织 AI 风险管理活动。 [{item.citation_id}]"
-            )
-
-        if {"govern", "identify", "protect", "detect", "respond", "recover"}.issubset(expected_terms):
-            return (
-                f"NIST Cybersecurity Framework 2.0 的 CSF Core 包含六个核心功能："
-                f"{self._format_term_list(['GOVERN', 'IDENTIFY', 'PROTECT', 'DETECT', 'RESPOND', 'RECOVER'])}。"
-                f"这些功能用来组织网络安全成果，并覆盖从治理、识别、防护、检测、响应到恢复的完整风险管理过程。 [{item.citation_id}]"
-            )
-
-        if expected_terms == {"govern"} and any(term in normalized_question for term in ["csf", "cybersecurity"]):
-            return (
-                "在 CSF 2.0 中，GOVERN 的作用是建立并监督组织的网络安全风险管理"
-                " strategy、expectations 和 policy；它为 IDENTIFY、PROTECT、DETECT、RESPOND、RECOVER "
-                f"这些功能提供治理方向和约束。 [{item.citation_id}]"
-            )
-
-        return ""
-
-    def _framework_terms_for_answer(self, expected_terms: set[str], normalized_question: str) -> list[str]:
-        if {"govern", "map", "measure", "manage"}.issubset(expected_terms) or any(
-            term in normalized_question for term in ["ai rmf", "rmf", "ai risk management"]
-        ):
-            return ["GOVERN", "MAP", "MEASURE", "MANAGE"]
-        return ["GOVERN", "IDENTIFY", "PROTECT", "DETECT", "RESPOND", "RECOVER"]
-
-    def _build_local_trustworthy_characteristics_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        terms = [
-            "valid and reliable",
-            "safe",
-            "secure and resilient",
-            "accountable and transparent",
-            "explainable and interpretable",
-            "privacy-enhanced",
-            "fair with harmful bias managed",
-        ]
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            terms,
-            require_all=False,
-            min_hits=4,
-        )
-        if item is None:
-            return ""
-        return (
-            "NIST AI RMF 1.0 把可信 AI 的特征概括为："
-            f"{self._format_term_list(terms)}。"
-            f"这些特征共同说明，可信 AI 不只是准确，还要兼顾安全、韧性、透明、可解释、隐私和公平等维度。 [{item.citation_id}]"
-        )
-
-    def _build_local_clip_dataset_scale_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            ["400 million", "image", "text", "pairs"],
-            require_all=False,
-            min_hits=3,
-        )
-        if item is None:
-            return ""
-        return (
-            "CLIP：400 million image-text pairs，也就是 400 million (image, text) pairs "
-            "collected from publicly available sources on the Internet."
-            f" [{item.citation_id}]"
-        )
-
-    def _build_local_sam_promptable_visual_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            ["segment anything", "sam", "promptable", "segmentation", "prompt", "mask"],
-            require_all=False,
-            min_hits=4,
-            prefer_visual=True,
-        )
-        if item is None or not self._is_visual_evidence_item(item):
-            return ""
-        return (
-            "Image evidence shows Segment Anything Model (SAM) promptable segmentation: "
-            "prompt image, valid mask, and input prompts produce object masks."
-            f" [{item.citation_id}]"
-        )
-
-    def _build_local_scanned_cardinal_visual_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            ["linnsequencer", "32", "midi", "产品", "说明"],
-            require_all=False,
-            min_hits=3,
-            prefer_visual=True,
-        )
-        if item is None or not self._is_visual_evidence_item(item):
-            return ""
-        return (
-            "图片实际内容：这是扫描型 PDF 中 LinnSequencer 32 轨 MIDI 序列录音机的产品说明/宣传介绍页，"
-            "面向专业音乐人，包含核心功能、操作方法和附加特性。"
-            f" [{item.citation_id}]"
-        )
-
-    def _build_local_transformer_core_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            ["transformer", "attention", "recurrence", "convolution", "encoder", "decoder"],
-            require_all=False,
-            min_hits=4,
-        )
-        if item is None:
-            return ""
-        return (
-            "核心思想：Transformer 是 attention-based encoder-decoder model，用于 sequence transduction，"
-            f"并 dispensing with recurrence and convolutions。 [{item.citation_id}]"
-        )
-
-    def _build_local_transformer_architecture_visual_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            ["transformer", "编码器", "解码器", "多头注意力", "前馈", "位置编码"],
-            require_all=False,
-            min_hits=3,
-            prefer_visual=True,
-        )
-        if item is None or not self._is_visual_evidence_item(item):
-            return ""
-        return (
-            "Image evidence: Transformer architecture includes encoder, decoder, multi-head attention, "
-            f"feed-forward network, and positional encoding. [{item.citation_id}]"
-        )
-
-    def _build_local_lifecycle_visual_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            ["lifecycle", "ai system", "dimensions"],
-            require_all=False,
-            min_hits=2,
-            prefer_visual=True,
-        )
-        if item is None or not self._is_visual_evidence_item(item):
-            return ""
-        return (
-            "视觉证据显示，Figure / Fig. 2 是 AI System 的 lifecycle 图："
-            "它用 outer circle 表示 AI lifecycle stages，并用 two inner circles 表示 key dimensions。"
-            f" [{item.citation_id}]"
-        )
-
-    def _build_local_bleu_result_answer(self, *, question: str, evidence: list[EvidenceItem]) -> str:
-        item = self._best_evidence_item_with_terms(
-            evidence,
-            ["bleu", "28.4", "41.8"],
-            require_all=True,
-            min_hits=3,
-            prefer_table=True,
-        )
-        if item is None:
-            return ""
-        return (
-            "表格中的代表性机器翻译 BLEU 数值是：WMT 2014 English-to-German 上 Transformer (big) "
-            "达到 28.4 BLEU，English-to-French 上达到 41.8 BLEU。"
-            f"这些数值来自表格/结果证据。 [{item.citation_id}]"
-        )
-
-    def _best_evidence_item_with_terms(
-        self,
-        evidence: list[EvidenceItem],
-        terms: list[str],
-        *,
-        require_all: bool,
-        min_hits: int,
-        prefer_visual: bool = False,
-        prefer_table: bool = False,
-    ) -> EvidenceItem | None:
-        normalized_terms = [term.lower() for term in terms if term]
-        if not normalized_terms:
-            return None
-        scored: list[tuple[float, int, EvidenceItem]] = []
-        for position, item in enumerate(evidence):
-            text = self._sanitize_evidence_text(f"{item.paper_name}\n{item.section or ''}\n{item.quote}\n{item.text}")
-            normalized = text.lower()
-            hits = [term for term in normalized_terms if term in normalized]
-            if require_all and len(hits) < len(normalized_terms):
+        bullets: list[str] = []
+        seen: set[str] = set()
+        for (_, quote), item in ranked:
+            if not item.citation_id or item.citation_id in seen:
                 continue
-            if len(hits) < min_hits:
+            quote = self._truncate_readable_text(quote or item.quote or item.text, limit=180)
+            if not quote:
                 continue
-            score = item.score + len(set(hits)) * 0.22
-            score += self._question_relevance_score(terms[0] if len(terms) == 1 else " ".join(terms), text) * 0.35
-            if prefer_visual and self._is_visual_evidence_item(item):
-                score += 1.0
-            if prefer_table and self._is_table_evidence_item(item):
-                score += 1.0
-            scored.append((score, position, item))
-        scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
-        return scored[0][2] if scored else None
+            bullets.append(f"- {quote} [{item.citation_id}]")
+            seen.add(item.citation_id)
+            if len(bullets) >= 3:
+                break
+        if not bullets:
+            return ""
+        if self._looks_like_metric_result_question(question):
+            prefix = "根据当前证据，能可靠摘出的结果/指标要点是："
+        elif self._looks_like_visual_evidence_question(question):
+            prefix = "根据当前图表或图片证据，能可靠说明的是："
+        else:
+            prefix = "根据当前最直接的原文证据，能可靠回答的是："
+        return prefix + "\n" + "\n".join(bullets)
 
-    def _format_term_list(self, terms: list[str]) -> str:
-        return "、".join(terms)
+    def _answer_citation_support_score(self, *, question: str, item: EvidenceItem) -> tuple[float, str]:
+        text = self._sanitize_evidence_text(item.text or "")
+        item_quote = self._sanitize_evidence_text(item.quote or "")
+        quote = self._best_answer_quote_for_item(question=question, item=item)
+        if not quote:
+            return (0.0, "")
 
-    def _looks_like_transformer_core_question(self, question: str) -> bool:
-        normalized = question.lower()
-        return (
-            not self._looks_like_visual_evidence_question(question)
-            and
-            any(term in normalized for term in ["attention is all you need", "transformer", "attention"])
-            and any(term in question for term in ["核心", "模型思想", "主要思想", "架构"])
+        combined_text = self._sanitize_evidence_text(f"{item.section or ''}\n{item_quote}\n{text}")
+        score = self._final_evidence_direct_support_score(question=question, item=item)
+        quote_support = self._answer_quote_support_score(question=question, quote=quote)
+        text_support = self._question_relevance_score(question, combined_text)
+        score += quote_support * 1.35 + text_support * 0.20
+
+        table_like = self._is_table_evidence_item(item) or self._is_table_like_text(quote)
+        if table_like and not self._looks_like_table_question(question):
+            score -= 0.65
+        if self._is_visual_evidence_item(item) and not self._question_requires_visual_evidence(question):
+            score -= 0.45
+        if self._looks_like_field_or_metadata_sentence(quote):
+            score -= 0.75
+        if (item.section or "").lower() == "references" and not self._looks_like_reference_question(question):
+            score -= 0.75
+        return (score, quote)
+
+    def _best_answer_quote_for_item(self, *, question: str, item: EvidenceItem) -> str:
+        text = self._sanitize_evidence_text(item.text or "")
+        item_quote = self._sanitize_evidence_text(item.quote or "")
+        candidates: list[str] = []
+
+        def add(candidate: str) -> None:
+            candidate = self._truncate_readable_text(candidate, limit=220)
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        add(item_quote)
+        if text:
+            add(self._best_quote_for_question(question, text, limit=220))
+        if item_quote:
+            add(self._best_quote_for_question(question, item_quote, limit=220))
+        if not candidates:
+            add(text)
+        if not candidates:
+            return ""
+        return max(
+            candidates,
+            key=lambda candidate: (
+                self._answer_quote_support_score(question=question, quote=candidate),
+                len(candidate),
+            ),
         )
 
-    def _looks_like_bleu_result_question(self, question: str) -> bool:
-        normalized = question.lower()
-        return "bleu" in normalized and any(term in normalized for term in ["wmt", "result", "结果", "数值", "table", "表格"])
-
-    def _looks_like_clip_dataset_scale_question(self, question: str) -> bool:
-        normalized = question.lower()
-        has_image_text_pair = any(
-            term in normalized
-            for term in ["图像-文本", "图像文本", "图像/文本", "image-text", "image text", "image, text"]
+    def _answer_quote_support_score(self, *, question: str, quote: str) -> float:
+        normalized = self._sanitize_evidence_text(quote).lower()
+        if not normalized:
+            return 0.0
+        focus_terms = self._quote_focus_terms(
+            question,
+            self._question_keywords(question),
+            self._answer_slot_terms_for_question(question),
         )
-        has_scale_intent = any(
-            term in normalized
-            for term in ["多大", "规模", "400", "million", "dataset", "data", "训练", "training"]
+        term_hits = sum(1 for term in focus_terms if self._quote_term_present(term, normalized))
+        score = self._question_relevance_score(question, normalized) * 2.0 + min(term_hits, 8) * 0.16
+        question_lower = question.lower()
+        asks_for_measured_detail = self._looks_like_metric_result_question(question) or any(
+            term in question_lower
+            for term in [
+                "efficiency",
+                "efficient",
+                "benefit",
+                "faster",
+                "smaller",
+                "memory",
+                "parameter",
+                "compute",
+                "latency",
+                "storage",
+            ]
         )
-        return "clip" in normalized and has_image_text_pair and has_scale_intent
-
-    def _looks_like_sam_promptable_visual_question(self, question: str) -> bool:
-        normalized = question.lower()
-        return (
-            ("segment anything" in normalized or "sam" in normalized)
-            and "promptable" in normalized
-            and "segmentation" in normalized
-            and self._looks_like_visual_evidence_question(question)
-        )
-
-    def _looks_like_scanned_cardinal_visual_question(self, question: str) -> bool:
-        normalized = question.lower()
-        return (
-            "ocrmypdf_cardinal" in normalized
-            and any(term in question for term in ["图片内容", "图片", "扫描"])
-            and self._looks_like_visual_evidence_question(question)
-        )
-
-    def _looks_like_lifecycle_visual_question(self, question: str) -> bool:
-        normalized = question.lower()
-        return any(term in normalized for term in ["生命周期", "lifecycle"]) and self._looks_like_visual_evidence_question(question)
-
-    def _looks_like_transformer_architecture_visual_question(self, question: str) -> bool:
-        normalized = question.lower()
-        return "transformer" in normalized and "架构" in question and self._looks_like_visual_evidence_question(question)
+        if asks_for_measured_detail and re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|times|m|b|k|million|billion)?\b", normalized):
+            score += 0.35
+        if any(term in question_lower for term in ["method", "architecture", "objective", "approach"]):
+            if any(phrase in normalized for phrase in ["we propose", "we present", "we introduce", "method", "architecture", "objective"]):
+                score += 0.25
+        return score
 
     def _model_failure_answer_plan(
         self,
@@ -618,6 +434,21 @@ class AgentAnsweringMixin:
                 final_prompt_evidence=plan.final_prompt_evidence,
                 prompt_evidence=plan.prompt_evidence,
                 runtime_detail="对话模型不可用；题目属于无证据证明类请求，已返回安全拒答。",
+            )
+        fallback_answer = self._build_local_structured_evidence_answer(
+            question=state.get("question", ""),
+            evidence=plan.prompt_evidence or state.get("evidence", []),
+        )
+        if state.get("needs_retrieval") and fallback_answer:
+            return AnswerPlan(
+                mode="local",
+                local_answer=fallback_answer,
+                answer_strategy="local_fallback_answer",
+                fallback_used=True,
+                final_prompt_evidence=plan.final_prompt_evidence,
+                prompt_evidence=plan.prompt_evidence,
+                evidence_coverage=plan.evidence_coverage,
+                runtime_detail="对话模型暂时不可用；已降级为本地证据摘录兜底回答，建议以右侧原文证据为准。",
             )
         return AnswerPlan(
             mode="unavailable",
@@ -659,8 +490,8 @@ class AgentAnsweringMixin:
             "runtime": [
                 *state.get("runtime", []),
                 RuntimeStep(
-                    node="answer",
-                    title="生成回答",
+                    node="answer_agent",
+                    title="答案组织 Agent 生成回答",
                     detail=plan.runtime_detail,
                 ),
             ],
@@ -691,7 +522,15 @@ class AgentAnsweringMixin:
 
         bullets: list[str] = []
         seen_citations: set[str] = set()
-        for item in evidence:
+        ranked_evidence = sorted(
+            (
+                (self._answer_citation_support_score(question=question, item=item), item)
+                for item in evidence
+            ),
+            key=lambda row: (row[0][0], float(row[1].score or 0.0)),
+            reverse=True,
+        )
+        for (answer_support, quote), item in ranked_evidence:
             if not item.citation_id or item.citation_id in seen_citations:
                 continue
             text = self._sanitize_evidence_text(item.quote or item.text)
@@ -701,9 +540,9 @@ class AgentAnsweringMixin:
             term_hits = sum(1 for term in required_terms if term.lower() in text.lower())
             if self._is_table_evidence_item(item) and not self._looks_like_metric_result_question(question):
                 continue
-            if support_score < 1.6 and term_hits < 2:
+            if support_score < 1.6 and term_hits < 2 and answer_support < 1.8:
                 continue
-            quote = self._truncate_readable_text(self._best_quote_for_question(question, item.text or text), limit=180)
+            quote = self._truncate_readable_text(quote or self._best_answer_quote_for_item(question=question, item=item), limit=180)
             if not quote:
                 quote = self._truncate_readable_text(text, limit=180)
             bullets.append(f"- {quote} [{item.citation_id}]")
@@ -717,37 +556,25 @@ class AgentAnsweringMixin:
     def _answer_slot_terms_for_question(self, question: str) -> list[str]:
         normalized = question.lower()
         terms: list[str] = []
-        if "transformer" in normalized or "attention" in normalized or "注意力" in question:
-            terms.extend(["Transformer", "attention mechanism", "attention", "sequence transduction", "multi-head"])
-        if "bert" in normalized:
-            terms.extend(["BERT", "masked language model", "next sentence prediction", "GLUE", "SQuAD"])
-        if "u-net" in normalized or "unet" in normalized or "医学图像" in question:
-            terms.extend(["U-Net", "contracting path", "expansive path", "data augmentation", "ISBI"])
+        if any(term in normalized for term in ["method", "architecture", "model", "mechanism", "objective"]):
+            terms.extend(["method", "architecture", "model", "mechanism", "objective", "approach"])
         if self._looks_like_metric_result_question(question):
-            terms.extend(["result", "Table", "score", "error", "BLEU", "GLUE", "SQuAD", "ISBI"])
+            terms.extend(["result", "table", "score", "metric", "accuracy", "error", "benchmark"])
         if self._looks_like_visual_evidence_question(question):
-            terms.extend(["Figure", "architecture", "model"])
-        if any(term in question for term in ["语料", "数据", "训练"]):
-            terms.extend(["corpus", "training", "dataset"])
-        if any(term in question for term in ["临床诊断", "医学影像", "机器翻译", "任何领域", "最优"]):
-            terms.extend(["临床诊断", "医学影像分割", "机器翻译", "任何领域", "最优"])
+            terms.extend(["figure", "table", "caption", "architecture", "diagram"])
+        if any(term in question for term in ["语料", "数据", "训练"]) or any(term in normalized for term in ["corpus", "training", "dataset"]):
+            terms.extend(["corpus", "training", "dataset", "data", "samples"])
+        if any(term in question for term in ["是否证明", "能否证明", "证明", "任何领域", "最优"]):
+            terms.extend(["evidence", "task", "domain", "result", "scope"])
         return list(dict.fromkeys(terms))[:10]
 
     def _refusal_scope_patch(self, *, question: str, answer: str) -> str:
-        normalized = f"{question}\n{answer}"
-        clauses: list[str] = []
-        if "临床诊断" in normalized and "临床诊断" not in answer:
-            clauses.append("不能证明临床诊断准确率相关结论")
-        if "医学影像" in normalized and "医学影像分割" not in answer:
-            clauses.append("不能证明医学影像分割效果")
-        if "机器翻译" in normalized and "机器翻译" not in answer:
-            clauses.append("不能证明机器翻译或 BLEU 结论")
-        if "任何领域" in normalized and "任何领域" not in answer:
-            clauses.append("不能证明任何领域都达到最优")
-        if not clauses:
+        normalized = f"{question}\n{answer}".lower()
+        if not any(marker in normalized for marker in ["证明", "prove", "是否", "能否", "any domain", "任何领域"]):
             return ""
-        return "拒答范围补充：" + "；".join(clauses) + "。"
-
+        if any(marker in answer for marker in ["不能证明", "证据不足", "无法证明", "没有证据"]):
+            return ""
+        return "拒答范围补充：当前证据只能支持文档中直接覆盖的任务、数据和结果，不能外推证明未被证据覆盖的主张。"
     def _stream_model_answer_tokens(self, state: PaperAgentState, plan: AnswerPlan):
         yield from self.model_clients.chat_text_stream(
             [SystemMessage(content=plan.system_prompt), HumanMessage(content=plan.user_prompt)],
@@ -896,10 +723,16 @@ class AgentAnsweringMixin:
             else:
                 scored.append(row)
 
-        candidates = scored or fallback
+        candidates = self._dedupe_prompt_candidate_rows(
+            question=question,
+            rows=scored or fallback,
+        )
         candidates.sort(key=lambda row: (row[0], -row[1]), reverse=True)
         modality_candidates = sorted(
-            [*scored, *fallback],
+            self._dedupe_prompt_candidate_rows(
+                question=question,
+                rows=[*scored, *fallback],
+            ),
             key=lambda row: (row[0], -row[1]),
             reverse=True,
         )
@@ -912,16 +745,307 @@ class AgentAnsweringMixin:
         ):
             limit = min(8, max(len(unique_documents), min(len(candidates), len(unique_documents) * 2)))
             selected = self._select_prompt_evidence_by_document(candidates, limit=limit)
+            selected = self._improve_prompt_evidence_coverage(
+                question=question,
+                selected=selected,
+                candidates=candidates,
+                limit=limit,
+            )
         else:
-            limit = min(4, max(2, len(candidates)))
-            selected = [item for _, _, item in candidates[:limit]]
+            max_prompt_evidence = 5 if self._looks_like_design_or_training_factor_question(question) else 4
+            limit = min(max_prompt_evidence, max(2, len(candidates)))
+            selected = self._select_prompt_evidence_by_coverage(
+                question=question,
+                candidates=candidates,
+                limit=limit,
+            )
         selected = self._ensure_required_modalities_in_prompt(
             question=question,
             selected=selected,
             candidates=[item for _, _, item in modality_candidates],
             limit=limit,
         )
+        selected = self._dedupe_prompt_evidence_items(question=question, selected=selected, limit=limit)
         return selected or evidence[: min(4, len(evidence))]
+
+    def _dedupe_prompt_candidate_rows(
+        self,
+        *,
+        question: str,
+        rows: list[tuple[float, int, EvidenceItem]],
+    ) -> list[tuple[float, int, EvidenceItem]]:
+        deduped: list[tuple[float, int, EvidenceItem]] = []
+        seen_chunks: set[str] = set()
+        ordered_rows = sorted(rows, key=lambda row: (row[0], -row[1]), reverse=True)
+        for row in ordered_rows:
+            _, _, item = row
+            key = f"{item.document_id}:{item.chunk_id}"
+            if key in seen_chunks:
+                continue
+            if any(self._prompt_evidence_is_near_duplicate(question=question, left=item, right=kept) for _, _, kept in deduped):
+                continue
+            deduped.append(row)
+            seen_chunks.add(key)
+        return deduped
+
+    def _dedupe_prompt_evidence_items(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        result: list[EvidenceItem] = []
+        for item in selected:
+            if any(self._prompt_evidence_is_near_duplicate(question=question, left=item, right=kept) for kept in result):
+                continue
+            result.append(item)
+            if len(result) >= limit:
+                break
+        return result
+
+    def _prompt_evidence_is_near_duplicate(
+        self,
+        *,
+        question: str,
+        left: EvidenceItem,
+        right: EvidenceItem,
+    ) -> bool:
+        if left.chunk_id and left.chunk_id == right.chunk_id and left.document_id == right.document_id:
+            return True
+        left_text = self._prompt_evidence_signature_text(left)
+        right_text = self._prompt_evidence_signature_text(right)
+        if not left_text or not right_text:
+            return False
+        if left.document_id == right.document_id and left.page == right.page:
+            if left_text in right_text or right_text in left_text:
+                return True
+        left_tokens = set(re.findall(r"[a-z0-9][a-z0-9-]{1,}|[\u4e00-\u9fff]{2,}", left_text))
+        right_tokens = set(re.findall(r"[a-z0-9][a-z0-9-]{1,}|[\u4e00-\u9fff]{2,}", right_text))
+        if len(left_tokens) < 6 or len(right_tokens) < 6:
+            return False
+        overlap = len(left_tokens & right_tokens) / max(min(len(left_tokens), len(right_tokens)), 1)
+        threshold = 0.82 if self._looks_like_metric_result_question(question) else 0.72
+        return overlap >= threshold
+
+    def _prompt_evidence_signature_text(self, item: EvidenceItem) -> str:
+        text = self._sanitize_evidence_text(item.quote or item.text).lower()
+        text = re.sub(r"\s+", " ", text).strip()
+        return self._truncate_readable_text(text, limit=520)
+
+    def _select_prompt_evidence_by_coverage(
+        self,
+        *,
+        question: str,
+        candidates: list[tuple[float, int, EvidenceItem]],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        selected: list[EvidenceItem] = []
+        selected_keys: set[str] = set()
+
+        def add(item: EvidenceItem) -> None:
+            key = f"{item.document_id}:{item.chunk_id}"
+            if key in selected_keys:
+                return
+            selected.append(item)
+            selected_keys.add(key)
+
+        roles = self._prompt_coverage_roles_for_question(question)
+        for role in roles:
+            role_rows = [
+                (
+                    self._prompt_evidence_role_score(question=question, item=item, role=role),
+                    base_score,
+                    -position,
+                    item,
+                )
+                for base_score, position, item in candidates
+                if f"{item.document_id}:{item.chunk_id}" not in selected_keys
+            ]
+            role_rows = [row for row in role_rows if row[0] >= 0.55]
+            if not role_rows:
+                continue
+            role_rows.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+            add(role_rows[0][3])
+            if len(selected) >= limit:
+                return selected[:limit]
+
+        for _, _, item in candidates:
+            add(item)
+            if len(selected) >= limit:
+                break
+        return selected[:limit]
+
+    def _improve_prompt_evidence_coverage(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        candidates: list[tuple[float, int, EvidenceItem]],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        result = self._dedupe_prompt_evidence_items(question=question, selected=selected, limit=limit)
+        selected_keys = {f"{item.document_id}:{item.chunk_id}" for item in result}
+        for role in self._prompt_coverage_roles_for_question(question):
+            if any(self._prompt_evidence_role_score(question=question, item=item, role=role) >= 0.55 for item in result):
+                continue
+            role_rows = [
+                (
+                    self._prompt_evidence_role_score(question=question, item=item, role=role),
+                    base_score,
+                    -position,
+                    item,
+                )
+                for base_score, position, item in candidates
+                if f"{item.document_id}:{item.chunk_id}" not in selected_keys
+            ]
+            role_rows = [row for row in role_rows if row[0] >= 0.65]
+            if not role_rows:
+                continue
+            role_rows.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+            item = role_rows[0][3]
+            if len(result) >= limit:
+                break
+            result.append(item)
+            selected_keys.add(f"{item.document_id}:{item.chunk_id}")
+        return result[:limit]
+
+    def _prompt_coverage_roles_for_question(self, question: str) -> list[str]:
+        normalized = question.lower()
+        roles: list[str] = ["direct"]
+        if self._looks_like_unsupported_proof_question(question):
+            roles.extend(["scope", "summary"])
+        if self._looks_like_metric_result_question(question) or any(
+            term in normalized
+            for term in ["result", "report", "efficiency", "benefit", "memory", "parameter", "faster", "smaller"]
+        ):
+            roles.extend(["result", "summary"])
+        if any(
+            term in normalized
+            for term in [
+                "method",
+                "approach",
+                "architecture",
+                "objective",
+                "mechanism",
+                "adaptation",
+                "main idea",
+                "setup",
+                "define",
+                "definition",
+                "design",
+                "training",
+                "factor",
+                "factors",
+                "ablation",
+            ]
+        ):
+            roles.extend(["method", "summary"])
+        if self._looks_like_compare_question(question) or self._looks_like_multi_document_topic_question(question):
+            roles.extend(["result", "method", "summary"])
+        return list(dict.fromkeys(roles))[:5]
+
+    def _prompt_evidence_role_score(self, *, question: str, item: EvidenceItem, role: str) -> float:
+        text = self._sanitize_evidence_text(f"{item.section or ''}\n{item.quote or ''}\n{item.text or ''}")
+        normalized = text.lower()
+        score = self._question_relevance_score(question, text) + float(item.score or 0.0) * 0.2
+        if self._is_visual_evidence_item(item) and not self._looks_like_visual_evidence_question(question):
+            score -= 0.8
+        if self._is_table_evidence_item(item) and not self._looks_like_table_question(question):
+            score -= 0.45
+        if role == "direct":
+            return score + self._final_evidence_direct_support_score(question=question, item=item) * 0.35
+        if role == "summary":
+            if any(marker in normalized for marker in ["abstract", "introduction", "in this paper", "in this work"]):
+                score += 0.45
+            if any(marker in normalized for marker in ["we propose", "we present", "we introduce", "contribution"]):
+                score += 0.55
+            return score
+        if role == "method":
+            section = (item.section or "").lower()
+            if any(marker in section for marker in ["method", "approach"]):
+                score += 0.45
+            if any(marker in section for marker in ["result", "conclusion"]) and not self._looks_like_metric_result_question(question):
+                score -= 0.35
+            if any(
+                marker in normalized
+                for marker in [
+                    "method",
+                    "approach",
+                    "architecture",
+                    "objective",
+                    "framework",
+                    "setup",
+                    "defined",
+                    "definition",
+                    "positive pair",
+                    "negative example",
+                    "negative examples",
+                    "augmented views",
+                    "latent space",
+                    "design",
+                    "training",
+                    "component",
+                    "components",
+                    "data augmentation",
+                    "augmentations",
+                    "learnable",
+                    "nonlinear",
+                    "transformation",
+                    "batch size",
+                    "training steps",
+                    "is designed to",
+                    "consists of",
+                    "we propose",
+                    "we introduce",
+                    "freeze",
+                    "frozen",
+                    "rank",
+                    "matrix",
+                ]
+            ):
+                score += 0.7
+            return score
+        if role == "result":
+            if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|times|m|b|k|million|billion)?\b", normalized):
+                score += 0.35
+            if any(
+                marker in normalized
+                for marker in [
+                    "result",
+                    "results",
+                    "achieves",
+                    "outperforms",
+                    "accuracy",
+                    "error",
+                    "benchmark",
+                    "faster",
+                    "smaller",
+                    "memory",
+                    "parameter",
+                    "efficient",
+                    "efficiency",
+                ]
+            ):
+                score += 0.65
+            return score
+        if role == "scope":
+            if any(
+                marker in normalized
+                for marker in [
+                    "task",
+                    "dataset",
+                    "domain",
+                    "scenario",
+                    "designed to",
+                    "address",
+                    "class imbalance",
+                    "object detection",
+                ]
+            ):
+                score += 0.65
+            return score
+        return score
 
     def _ensure_required_modalities_in_prompt(
         self,
@@ -1014,12 +1138,31 @@ class AgentAnsweringMixin:
             summary = self._summarize_evidence_for_model_prompt(question=question, item=item)
             if not summary:
                 continue
+            use_label = self._evidence_prompt_use_label(question=question, item=item)
             blocks.append(
                 f"[{item.citation_id}] {item.paper_name} | Page {self._evidence_page_label(item)} | "
-                f"Section: {item.section or 'Unknown'} | Type: {item.chunk_type or 'text'} | Score: {item.score:.3f}\n"
+                f"Section: {item.section or 'Unknown'} | Type: {item.chunk_type or 'text'} | "
+                f"Use: {use_label} | Score: {item.score:.3f}\n"
                 f"{summary}"
             )
         return "\n\n".join(blocks)
+
+    def _evidence_prompt_use_label(self, *, question: str, item: EvidenceItem) -> str:
+        role_labels = {
+            "method": "method detail",
+            "result": "result or efficiency claim",
+            "summary": "paper-level summary",
+            "scope": "scope boundary",
+            "direct": "direct support",
+        }
+        scored = [
+            (self._prompt_evidence_role_score(question=question, item=item, role=role), role)
+            for role in self._prompt_coverage_roles_for_question(question)
+        ]
+        scored.sort(reverse=True)
+        if scored and scored[0][0] >= 0.55:
+            return role_labels.get(scored[0][1], "direct support")
+        return "supporting context"
 
     def _compact_evidence_for_model_prompt(
         self,
@@ -1049,9 +1192,9 @@ class AgentAnsweringMixin:
         if self._is_visual_evidence_item(item) and self._looks_like_visual_evidence_question(question):
             return self._truncate_readable_text(text, limit=520)
         if self._is_table_evidence_item(item) and self._looks_like_metric_result_question(question) and item.quote:
-            return self._truncate_readable_text(item.quote, limit=620)
+            return self._best_table_quote_for_question(question, item.quote or text, limit=620)
         if self._is_table_evidence_item(item) and self._looks_like_table_question(question):
-            return self._truncate_readable_text(text, limit=500)
+            return self._best_table_quote_for_question(question, item.quote or text, limit=500)
         if self._looks_like_debug_or_improvement_question(question):
             focused_debug = self._debug_or_improvement_quote(text)
             if focused_debug:
@@ -1199,6 +1342,9 @@ class AgentAnsweringMixin:
     def _model_prompt_semantic_score(self, *, question: str, item: EvidenceItem, text: str) -> float:
         score = 0.0
         section = item.section or ""
+        shape_bonus = getattr(self, "_scientific_evidence_shape_bonus", None)
+        if callable(shape_bonus):
+            score += float(shape_bonus(question=question, item=item, text=text) or 0.0) * 0.35
         if self._looks_like_overview_question(question) or any(word in question for word in ["介绍", "说说", "讲讲"]):
             role_scores = self._semantic_role_scores(
                 text=text,
@@ -1255,15 +1401,18 @@ class AgentAnsweringMixin:
         framework_hits = sum(
             1
             for term in [
-                "govern",
-                "map",
-                "measure",
-                "manage",
-                "identify",
-                "protect",
-                "detect",
-                "respond",
-                "recover",
+                "function",
+                "functions",
+                "core",
+                "component",
+                "components",
+                "capability",
+                "capabilities",
+                "stage",
+                "process",
+                "role",
+                "policy",
+                "strategy",
             ]
             if re.search(rf"\b{re.escape(term)}\b", normalized.lower())
         )
@@ -1838,17 +1987,112 @@ class AgentAnsweringMixin:
         proof_markers = ["prove", "证明", "是否证明", "can ", "does ", "能否证明", "能证明"]
         if not any(marker in normalized for marker in proof_markers):
             return False
-        medical_markers = ["medical diagnosis", "clinical diagnosis", "临床诊断", "医学诊断", "diagnosis"]
-        unsupported_metric_markers = ["accuracy", "准确率", "improved accuracy", "显著提高"]
-        if any(marker in normalized for marker in medical_markers) and any(
-            marker in normalized for marker in unsupported_metric_markers
-        ):
-            return True
-        benchmark_markers = ["sota", "benchmark", "lambada", "new state-of-the-art", "基准"]
-        scanned_or_product_markers = ["ocrmypdf_cardinal", "scanned", "扫描", "product", "产品"]
-        return any(marker in normalized for marker in benchmark_markers) and any(
-            marker in normalized for marker in scanned_or_product_markers
+        unsupported_scope_markers = [
+            "any domain",
+            "任何领域",
+            "all domains",
+            "所有领域",
+            "always",
+            "总是",
+            "guarantee",
+            "保证",
+            "improved accuracy",
+            "显著提高",
+        ]
+        return any(marker in normalized for marker in unsupported_scope_markers)
+
+    def _should_decline_cross_scope_proof_question(
+        self,
+        *,
+        question: str,
+        evidence: list[EvidenceItem],
+    ) -> bool:
+        if not evidence or not self._looks_like_proof_request(question):
+            return False
+        claim_terms = self._proof_claim_terms(question)
+        if len(claim_terms) < 4:
+            return False
+        evidence_text = self._sanitize_evidence_text(
+            " ".join(f"{item.section or ''} {item.quote or ''} {item.text or ''}" for item in evidence[:6])
+        ).lower()
+        hits = sum(1 for term in claim_terms if self._proof_term_present(term, evidence_text))
+        required_hits = max(3, min(5, (len(claim_terms) + 1) // 2))
+        return hits < required_hits
+
+    def _looks_like_proof_request(self, question: str) -> bool:
+        normalized = question.lower()
+        return any(
+            marker in normalized
+            for marker in [
+                "prove",
+                "prove that",
+                "demonstrate that",
+                "show that",
+                "evidence for",
+                "support the claim",
+                "证明",
+                "能否证明",
+                "是否证明",
+            ]
         )
+
+    def _extract_proof_claim_text(self, question: str) -> str:
+        normalized = " ".join(str(question or "").split())
+        patterns = [
+            r"\bprove\s+(?:that\s+)?(.+)$",
+            r"\bdemonstrate\s+(?:that\s+)?(.+)$",
+            r"\bshow\s+(?:that\s+)?(.+)$",
+            r"证明(.+)$",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip(" ?？。")
+        return normalized
+
+    def _proof_claim_terms(self, question: str) -> list[str]:
+        claim = self._extract_proof_claim_text(question).lower()
+        stopwords = {
+            "the",
+            "this",
+            "that",
+            "paper",
+            "document",
+            "prove",
+            "does",
+            "can",
+            "whether",
+            "claim",
+            "shows",
+            "show",
+            "demonstrate",
+            "demonstrates",
+            "in",
+            "on",
+            "for",
+            "with",
+            "and",
+            "or",
+            "of",
+            "to",
+            "a",
+            "an",
+        }
+        terms: list[str] = []
+        for token in re.findall(r"[a-z0-9][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}", claim):
+            token = token.strip("-")
+            if token and token not in stopwords and token not in terms:
+                terms.append(token)
+        return terms[:12]
+
+    def _proof_term_present(self, term: str, text: str) -> bool:
+        if term in text:
+            return True
+        if term.endswith("s") and term[:-1] in text:
+            return True
+        if "-" in term and term.replace("-", " ") in text:
+            return True
+        return False
 
     def _build_unsupported_proof_refusal_answer(
         self,
@@ -1857,23 +2101,57 @@ class AgentAnsweringMixin:
         evidence: list[EvidenceItem],
     ) -> str:
         citations = self._join_citations([item.citation_id for item in evidence[:2]])
-        normalized = question.lower()
-        if any(marker in normalized for marker in ["medical diagnosis", "clinical diagnosis", "临床诊断", "医学诊断", "diagnosis"]):
-            return (
-                "不能证明：当前证据只能说明文档自身范围内的内容，"
-                "没有 medical diagnosis / clinical diagnosis accuracy 实验的直接证据，"
-                f"所以不能据此得出 accuracy improved 或准确率提高的结论。{citations}"
-            )
-        if any(marker in normalized for marker in ["lambada", "sota", "benchmark", "new state-of-the-art"]):
-            return (
-                "不能证明：扫描 PDF 的视觉证据指向 LinnSequencer 产品说明页，"
-                "它不是 GPT-2 LAMBADA benchmark 的直接证据；"
-                f"因此没有证据证明 scanned PDF 本身支持 GPT-2 achieved new SOTA on LAMBADA。{citations}"
-            )
+        claim = self._truncate_readable_text(self._extract_proof_claim_text(question), limit=220)
+        scope_item, scope_quote = self._best_scope_quote_for_refusal(question=question, evidence=evidence)
+        scope_line = ""
+        if scope_item is not None and scope_quote:
+            scope_line = f"\n- 当前证据实际覆盖的是：{scope_quote} [{scope_item.citation_id}]"
+        claim_line = f"\n- 问题要求证明的主张是：{claim}。" if claim else ""
         return (
-            "不能证明：当前文档证据不足以支持这个外推主张，"
-            f"没有直接证据可以据此得出该结论。{citations}"
+            "不能证明：当前证据只能说明文档中直接出现的任务、数据、方法或结果，"
+            "不足以外推证明问题中的主张。"
+            f"{scope_line}{claim_line}\n请以右侧原文证据为准，必要时换成更贴近原文范围的问题。{citations}"
         )
+
+    def _best_scope_quote_for_refusal(
+        self,
+        *,
+        question: str,
+        evidence: list[EvidenceItem],
+    ) -> tuple[EvidenceItem | None, str]:
+        scope_terms = [
+            "task",
+            "dataset",
+            "domain",
+            "scenario",
+            "designed to",
+            "address",
+            "class imbalance",
+            "object detection",
+            "training",
+            "evaluation",
+        ]
+        scored: list[tuple[float, int, EvidenceItem, str]] = []
+        for position, item in enumerate(evidence[:6]):
+            text = self._sanitize_evidence_text(item.text or item.quote)
+            if not text:
+                continue
+            quote = self._keyword_focused_quote(
+                text=text,
+                terms=scope_terms,
+                bonus_phrases=["designed to", "address", "scenario"],
+                limit=260,
+            ) or self._best_quote_for_question(question, text, limit=220)
+            normalized = quote.lower()
+            score = sum(1 for term in scope_terms if term in normalized)
+            score += self._question_relevance_score(question, text)
+            if quote:
+                scored.append((score, position, item, quote))
+        scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        if not scored:
+            return None, ""
+        _, _, item, quote = scored[0]
+        return item, self._truncate_readable_text(quote, limit=220)
 
     def _build_local_reference_answer(
         self,
@@ -2000,8 +2278,6 @@ class AgentAnsweringMixin:
                 return match.group(1).strip(" ，,。；;")
         if all(keyword in text for keyword in ["文献分析", "情境推演", "机制建构"]):
             return "文献分析、情境推演和机制建构"
-        if all(keyword.lower() in normalized.lower() for keyword in ["transformer", "attention"]):
-            return "提出 Transformer 架构，用自注意力替代循环/卷积结构，并在机器翻译等任务上实验验证"
         return "原文没有清楚给出可复核的研究方法"
 
     def _extract_main_claim_from_text(self, text: str) -> str:
@@ -2010,7 +2286,6 @@ class AgentAnsweringMixin:
             r"研究认为，([^。]{20,180})。",
             r"结论与展望\s*([^。]{20,180})。",
             r"总体而言，([^。]{20,180})。",
-            r"(In this work, we presented the Transformer[^.]{20,220}\.)",
             r"(We propose a new simple network architecture[^.]{20,220}\.)",
             r"(Our model achieves[^.]{20,220}\.)",
         ]

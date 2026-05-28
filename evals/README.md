@@ -44,3 +44,33 @@ NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost python -m backend.app.
 - `avg_citation_support_rate`：回答引用是否支撑 gold evidence。
 - `avg_answer_point_coverage`：回答覆盖 expected answer points 的比例。
 - `embedding_fallback_rate`：是否退回本地 embedding，非 0 时结果不适合做横向比较。
+
+## Unseen Paper Generalization Baseline
+
+`generalization_gold_v1` is a supporting gold benchmark for checking generalization on papers that are not part of the original demo set. It uses 4 additional papers and 10 cases covering method explanation, benchmark results, training/data factors, efficiency claims, multi-document comparison, and unsupported cross-domain claims.
+
+Prepare documents:
+
+```bash
+mkdir -p data/eval_documents
+curl -L -o data/eval_documents/efficientnet.pdf https://arxiv.org/pdf/1905.11946
+curl -L -o data/eval_documents/focal-loss.pdf https://arxiv.org/pdf/1708.02002
+curl -L -o data/eval_documents/simclr.pdf https://arxiv.org/pdf/2002.05709
+curl -L -o data/eval_documents/lora.pdf https://arxiv.org/pdf/2106.09685
+```
+
+Index those PDFs in the app, then run:
+
+```bash
+python -m backend.app.eval_cli --baseline generalization_gold_v1 --write-report
+```
+
+The CLI writes the normal JSON result and, with `--write-report`, a Markdown summary in `data/eval_runs`.
+
+To diagnose where gold evidence is lost without changing retrieval behavior, add `--audit-gold`:
+
+```bash
+python -m backend.app.eval_cli --baseline generalization_gold_v1 --write-report --audit-gold
+```
+
+The audit table reports how many gold evidence items appeared in fused candidates, retrieval-selected evidence, answer prompt evidence, visible evidence, and cited evidence.

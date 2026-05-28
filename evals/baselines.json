@@ -20,6 +20,16 @@
       "suite_name": "rag_gold_v1",
       "document_policy": "expected_ready",
       "description": "3 篇经典论文的长期 RAG 回归评测，覆盖 gold evidence、答案要点、引用支撑、拒答、多文档和图表相关问题。"
+    },
+    {
+      "id": "generalization_gold_v1",
+      "label": "Unseen Paper Generalization Gold",
+      "tier": "gold",
+      "status": "supporting",
+      "suite_path": "generalization_gold_eval_set.json",
+      "suite_name": "generalization_gold_v1",
+      "document_policy": "expected_ready",
+      "description": "4 篇非样本论文的泛化评测，覆盖方法、结果、数据/训练因素、效率、多文档对比和跨领域拒答。"
     }
   ]
 }

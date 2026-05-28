@@ -15,6 +15,24 @@ from backend.app.agent_parts.state import (
 from backend.app.models import EvidenceItem, RetrievalDebugItem, RuntimeStep
 
 
+PDF_TEXT_REPLACEMENTS = {
+    "\ufb00": "ff",
+    "\ufb01": "fi",
+    "\ufb02": "fl",
+    "\ufb03": "ffi",
+    "\ufb04": "ffl",
+    "\ufb05": "st",
+    "\ufb06": "st",
+    "\u00ad": "",
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+}
+
+
 class AgentTextUtilityMixin:
     def _extract_field(self, text: str, field_name: str) -> str:
         pattern = rf"{re.escape(field_name)}\s*[:：]\s*([^。；;\n]+?)(?=\s*(实验类型|指导教师|专业班级|姓名|学号|电子邮件|实\s*验\s*日\s*期|一、|二、|$))"
@@ -38,7 +56,11 @@ class AgentTextUtilityMixin:
         return match.group(1).strip()
 
     def _sanitize_evidence_text(self, text: str) -> str:
-        sanitized = re.sub(r"[\w.\-+]+@[\w.\-]+\.\w+", "[邮箱已隐藏]", text)
+        sanitized = str(text or "")
+        for source, target in PDF_TEXT_REPLACEMENTS.items():
+            sanitized = sanitized.replace(source, target)
+        sanitized = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", sanitized)
+        sanitized = re.sub(r"[\w.\-+]+@[\w.\-]+\.\w+", "[邮箱已隐藏]", sanitized)
         sanitized = re.sub(r"(姓\s*名|姓名)\s*[:：]\s*\S+", r"\1：[已隐藏]", sanitized)
         sanitized = re.sub(r"(学\s*号|学号)\s*[:：]\s*\S+", r"\1：[已隐藏]", sanitized)
         sanitized = re.sub(r"(电子邮件|邮箱)\s*[:：]\s*\S+", r"\1：[已隐藏]", sanitized)
@@ -158,17 +180,22 @@ class AgentTextUtilityMixin:
             "研究认为",
         ]
         medium_markers = [
-            "transformer",
-            "attention",
-            "sequence transduction",
-            "machine translation",
             "state-of-the-art",
             "architecture",
             "model",
             "training",
+            "method",
+            "experiment",
+            "evaluation",
+            "dataset",
+            "benchmark",
+            "result",
             "实验",
             "模型",
             "方法",
+            "评测",
+            "数据",
+            "结果",
         ]
         score += sum(0.22 for marker in strong_markers if marker in normalized)
         score += sum(0.08 for marker in medium_markers if marker in normalized)
@@ -268,11 +295,16 @@ class AgentTextUtilityMixin:
     def _question_relevance_score(self, question: str, text: str) -> float:
         normalized_text = " ".join(self._sanitize_evidence_text(text).lower().split())
         tokens = self._question_keywords(question)
-        if not tokens or not normalized_text:
+        if not normalized_text:
             return 0.0
 
         hits = sum(1 for token in tokens if token.lower() in normalized_text)
-        exact_score = hits / max(len(tokens), 1)
+        exact_score = hits / max(len(tokens), 1) if tokens else 0.0
+
+        phrases = self._question_keyphrases(question)
+        phrase_text = normalized_text.replace("-", " ")
+        phrase_hits = sum(1 for phrase in phrases if phrase in phrase_text)
+        phrase_score = phrase_hits / max(min(len(phrases), 6), 1) if phrases else 0.0
 
         q_chars = re.findall(r"[\u4e00-\u9fff]", question)
         t_chars = set(re.findall(r"[\u4e00-\u9fff]", normalized_text))
@@ -287,7 +319,7 @@ class AgentTextUtilityMixin:
                 char_hits = sum(1 for char in meaningful_chars if char in t_chars)
                 char_score = char_hits / max(len(meaningful_chars), 1)
 
-        return max(0.0, min(1.0, exact_score * 0.75 + char_score * 0.25))
+        return max(0.0, min(1.0, exact_score * 0.55 + phrase_score * 0.3 + char_score * 0.15))
 
     def _question_keywords(self, question: str) -> list[str]:
         normalized = question.lower()
@@ -360,6 +392,60 @@ class AgentTextUtilityMixin:
             if cleaned not in unique:
                 unique.append(cleaned)
         return unique[:40]
+
+    def _question_keyphrases(self, question: str) -> list[str]:
+        normalized = " ".join(self._sanitize_evidence_text(question).lower().split())
+        words = re.findall(r"[a-z0-9][a-z0-9\-]*", normalized)
+        stopwords = {
+            "what",
+            "which",
+            "where",
+            "when",
+            "how",
+            "does",
+            "did",
+            "is",
+            "are",
+            "was",
+            "were",
+            "the",
+            "this",
+            "that",
+            "paper",
+            "document",
+            "report",
+            "reported",
+            "describe",
+            "describes",
+            "claim",
+            "claims",
+            "about",
+            "with",
+            "from",
+            "compared",
+            "previous",
+            "use",
+            "uses",
+            "using",
+        }
+        content = [word for word in words if len(word) >= 3 and word not in stopwords]
+        phrases: list[str] = []
+
+        def add(value: str) -> None:
+            cleaned = " ".join(value.replace("-", " ").split())
+            if len(cleaned) < 5 or cleaned in phrases:
+                return
+            phrases.append(cleaned)
+
+        for size in range(4, 1, -1):
+            for start in range(0, max(len(content) - size + 1, 0)):
+                phrase_words = content[start : start + size]
+                if not any(len(word) >= 5 for word in phrase_words):
+                    continue
+                add(" ".join(phrase_words))
+                if len(phrases) >= 18:
+                    return phrases
+        return phrases
 
     def _looks_like_reference_section_text(self, text: str) -> bool:
         normalized = " ".join(text.split())
@@ -526,7 +612,7 @@ class AgentTextUtilityMixin:
             return ""
 
         blocked = ["姓名", "学号", "电子邮件", "邮箱", "实验评分"]
-        candidates = re.split(r"\n+|(?<=[。！？.!?；;])\s*", sanitized)
+        candidates = re.split(r"\n+|(?<=[。！？；;.!?])\s+", sanitized)
         for candidate in candidates:
             cleaned = " ".join(candidate.split()).strip()
             if len(cleaned) < 12:
@@ -539,7 +625,7 @@ class AgentTextUtilityMixin:
             return cleaned[:limit] + ("..." if len(cleaned) > limit else "")
 
         if self._is_table_like_text(normalized):
-            return normalized[: min(limit, 120)] + ("..." if len(normalized) > min(limit, 120) else "")
+            return self._best_table_quote_for_question("", sanitized, limit=min(limit, 180))
         return normalized[:limit] + ("..." if len(normalized) > limit else "")
 
     def _best_quote_for_question(self, question: str, text: str, limit: int = 240) -> str:
@@ -549,21 +635,208 @@ class AgentTextUtilityMixin:
 
         if self._looks_like_reference_question(question):
             return self._best_reference_quote(sanitized, limit=limit)
-        elif self._looks_like_document_wide_question(question):
+        if self._is_table_like_text(sanitized):
+            return self._best_table_quote_for_question(question, sanitized, limit=limit)
+        if self._looks_like_document_wide_question(question):
             preferred_keywords = self._overview_focus_keywords(question)
         else:
             preferred_keywords = self._question_keywords(question)
 
-        candidates = [
+        quote = self._focused_sentence_quote(
+            question=question,
+            text=sanitized,
+            preferred_keywords=preferred_keywords,
+            limit=limit,
+        )
+        return quote or self._best_readable_quote(sanitized, limit=limit)
+
+    def _focused_sentence_quote(
+        self,
+        *,
+        question: str,
+        text: str,
+        preferred_keywords: list[str],
+        limit: int,
+        extra_terms: list[str] | None = None,
+        bonus_phrases: list[str] | None = None,
+    ) -> str:
+        sentences = self._split_quote_sentences(text)
+        if not sentences:
+            return ""
+        question_terms = self._quote_focus_terms(question, preferred_keywords, extra_terms or [])
+        normalized_bonus = [term.lower() for term in bonus_phrases or [] if term]
+        scored: list[tuple[float, int, str]] = []
+        for position, sentence in enumerate(sentences):
+            normalized = sentence.lower()
+            term_hits = sum(1 for term in question_terms if self._quote_term_present(term, normalized))
+            bonus_hits = sum(1 for term in normalized_bonus if term in normalized)
+            number_bonus = 0.35 if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|m|b|k|million|billion)?\b", normalized) else 0.0
+            method_bonus = 0.2 if any(term in normalized for term in ["we propose", "we present", "we show", "result", "dataset", "method"]) else 0.0
+            score = term_hits + bonus_hits * 1.8 + number_bonus + method_bonus
+            if score > 0:
+                scored.append((score, position, sentence))
+        if not scored:
+            return ""
+        scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        picked = sorted(scored[:2], key=lambda row: row[1])
+        quote = " ".join(sentence for _, _, sentence in picked)
+        return self._truncate_readable_text(quote, limit=limit)
+
+    def _split_quote_sentences(self, text: str) -> list[str]:
+        sanitized = self._sanitize_evidence_text(text)
+        parts = [
             " ".join(part.split()).strip()
-            for part in re.split(r"\n+|(?<=[。！？.!?；;])\s*", sanitized)
+            for part in re.split(r"\n+|(?<=[.!?。！？；;])\s+", sanitized)
             if part.strip()
         ]
-        for keyword in preferred_keywords:
-            for candidate in candidates:
-                if keyword in candidate and not self._is_table_like_text(candidate):
-                    return candidate[:limit] + ("..." if len(candidate) > limit else "")
-        return self._best_readable_quote(sanitized, limit=limit)
+        result: list[str] = []
+        for part in parts:
+            if len(part) > 420 and re.search(r"[,，;；]", part):
+                result.extend(
+                    segment.strip()
+                    for segment in re.split(r"(?<=[,，;；])\s+", part)
+                    if len(segment.strip()) >= 20
+                )
+            else:
+                result.append(part)
+        return [part for part in result if len(part) >= 8 and not self._is_table_like_text(part)]
+
+    def _quote_focus_terms(
+        self,
+        question: str,
+        preferred_keywords: list[str],
+        extra_terms: list[str],
+    ) -> list[str]:
+        terms: list[str] = []
+
+        def add(term: str) -> None:
+            lowered = term.strip().lower()
+            stopwords = {
+                "what",
+                "which",
+                "where",
+                "when",
+                "how",
+                "does",
+                "did",
+                "is",
+                "are",
+                "was",
+                "were",
+                "the",
+                "this",
+                "that",
+                "for",
+                "and",
+                "with",
+                "from",
+                "reported",
+                "report",
+            }
+            if len(lowered) >= 2 and lowered not in stopwords and lowered not in terms:
+                terms.append(lowered)
+
+        for term in [*preferred_keywords, *extra_terms]:
+            add(str(term))
+        for phrase in self._question_keyphrases(question)[:8]:
+            add(phrase)
+        for token in re.findall(r"[a-z0-9][a-z0-9\-]{1,}|[\u4e00-\u9fff]{2,}", question.lower()):
+            add(token)
+        role_detector = getattr(self, "_paper_structure_roles_for_question", None)
+        term_getter = getattr(self, "_paper_structure_role_terms", None)
+        if callable(role_detector) and callable(term_getter):
+            for role in role_detector(question):
+                for term in term_getter(role, kind="evidence")[:8]:
+                    add(term)
+        return terms[:32]
+
+    def _best_table_quote_for_question(self, question: str, text: str, limit: int = 320) -> str:
+        rows = self._split_table_rows(text)
+        if not rows:
+            normalized = " ".join(self._sanitize_evidence_text(text).split())
+            return self._truncate_readable_text(normalized, limit=min(limit, 180))
+        header = self._table_header_row(rows)
+        focus_terms = self._quote_focus_terms(question, self._question_keywords(question), [])
+        scored: list[tuple[float, int, str]] = []
+        for position, row in enumerate(rows):
+            if header and row == header:
+                continue
+            normalized = row.lower()
+            term_hits = sum(1 for term in focus_terms if self._quote_term_present(term, normalized))
+            number_hits = len(re.findall(r"\b\d+(?:\.\d+)?\s*(?:%|m|b|k|million|billion)?\b", normalized))
+            metric_hits = sum(
+                1
+                for term in ["accuracy", "error", "score", "metric", "result", "auc", "f1", "%", "结果", "指标"]
+                if term in normalized
+            )
+            score = term_hits + min(number_hits, 3) * 0.35 + metric_hits * 0.45
+            if score > 0:
+                scored.append((score, position, row))
+        if not scored:
+            scored = [
+                (
+                    len(re.findall(r"\d", row)) * 0.05 + (0.2 if "|" in row or "\t" in row else 0.0),
+                    position,
+                    row,
+                )
+                for position, row in enumerate(rows)
+                if not header or row != header
+            ]
+        scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        picked_scored = scored[:1]
+        if len(scored) > 1 and scored[1][0] >= scored[0][0] - 0.2:
+            picked_scored.append(scored[1])
+        picked_rows = [row for _, _, row in sorted(picked_scored, key=lambda item: item[1])]
+        output_rows: list[str] = []
+        if header:
+            output_rows.append(header)
+        for row in picked_rows:
+            if row not in output_rows:
+                output_rows.append(row)
+        return self._truncate_readable_text(" | ".join(output_rows), limit=limit)
+
+    def _quote_term_present(self, term: str, normalized_text: str) -> bool:
+        if re.fullmatch(r"[a-z0-9][a-z0-9\-]*", term):
+            return bool(re.search(rf"\b{re.escape(term)}\b", normalized_text))
+        return term in normalized_text
+
+    def _split_table_rows(self, text: str) -> list[str]:
+        rows: list[str] = []
+        for raw_line in self._sanitize_evidence_text(text).splitlines():
+            line = " ".join(raw_line.split()).strip()
+            if not line:
+                continue
+            if re.fullmatch(r"[:|\-\s]+", line):
+                continue
+            if "|" in line:
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                cells = [cell for cell in cells if cell]
+                if cells:
+                    rows.append(" | ".join(cells))
+                continue
+            if "\t" in line:
+                cells = [cell.strip() for cell in line.split("\t") if cell.strip()]
+                if cells:
+                    rows.append(" | ".join(cells))
+                continue
+            rows.append(line)
+        if len(rows) <= 1:
+            flattened = " ".join(self._sanitize_evidence_text(text).split())
+            rows = [
+                part.strip()
+                for part in re.split(r"\s{2,}|(?<=\d)\s+(?=[A-Z][A-Za-z0-9 /-]{2,}\s+\d)", flattened)
+                if part.strip()
+            ]
+        return rows
+
+    def _table_header_row(self, rows: list[str]) -> str:
+        for row in rows[:3]:
+            normalized = row.lower()
+            has_metric_word = any(term in normalized for term in ["metric", "score", "accuracy", "error", "model", "method", "dataset", "指标", "结果"])
+            has_many_numbers = len(re.findall(r"\d", row)) >= 4
+            if has_metric_word and not has_many_numbers:
+                return row
+        return ""
 
     def _best_reference_quote(self, text: str, limit: int = 240) -> str:
         references = self._extract_references_from_text(text)

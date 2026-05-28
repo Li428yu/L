@@ -107,6 +107,8 @@ class PaperAgentService(
             "retrieval_pipeline": "",
             "ranking_method": "",
             "embedding_trace": {},
+            "agent_calls": [],
+            "active_agent": "main_agent",
         }
 
         final_state = state
@@ -223,6 +225,7 @@ class PaperAgentService(
             evidence=visible_evidence,
             document_ids=retrieval_document_ids,
         )
+        agent_calls = state.get("agent_calls") or []
 
         return AskResponse(
             answer=answer,
@@ -262,6 +265,7 @@ class PaperAgentService(
                 document_relation_map=document_relation_map,
                 multi_document_coverage=multi_document_coverage,
                 visual_ocr_warnings=visual_ocr_warnings,
+                agent_calls=agent_calls,
             ),
             memory_used=self.memory.build_memory_context(conversation_id, question=request.question),
         )
@@ -652,41 +656,165 @@ class PaperAgentService(
     def _build_graph(self):
         builder = StateGraph(PaperAgentState)
         builder.add_node("memory", self._load_memory)
-        builder.add_node("planner", self._plan)
-        builder.add_node("retriever", self._retrieve)
-        builder.add_node("evidence_judge", self._judge_evidence)
-        builder.add_node("retrieval_refiner", self._refine_retrieval)
-        builder.add_node("answer", self._answer)
-        builder.add_node("verifier", self._verify_answer)
+        builder.add_node("main_agent", self._main_agent)
+        builder.add_node("retrieval_agent", self._retrieval_agent)
+        builder.add_node("retrieval_evidence_audit", self._retrieval_agent_evidence_audit)
+        builder.add_node("retrieval_refiner", self._retrieval_agent_refine)
+        builder.add_node("answer_agent", self._answer_agent)
+        builder.add_node("audit_agent", self._audit_agent)
         builder.add_node("memory_writer", self._write_memory)
         builder.add_edge(START, "memory")
-        builder.add_edge("memory", "planner")
+        builder.add_edge("memory", "main_agent")
         builder.add_conditional_edges(
-            "planner",
-            self._route_after_planner,
-            {"retrieve": "retriever", "answer": "answer"},
+            "main_agent",
+            self._route_after_main_agent,
+            {"retrieve": "retrieval_agent", "answer": "answer_agent"},
         )
-        builder.add_edge("retriever", "evidence_judge")
+        builder.add_edge("retrieval_agent", "retrieval_evidence_audit")
         builder.add_conditional_edges(
-            "evidence_judge",
+            "retrieval_evidence_audit",
             self._route_after_evidence_judge,
-            {"retry_retrieve": "retrieval_refiner", "answer": "answer"},
+            {"retry_retrieve": "retrieval_refiner", "answer": "answer_agent"},
         )
-        builder.add_edge("retrieval_refiner", "retriever")
+        builder.add_edge("retrieval_refiner", "retrieval_agent")
         builder.add_conditional_edges(
-            "answer",
+            "answer_agent",
             self._route_after_answer,
-            {"verify": "verifier", "write_memory": "memory_writer"},
+            {"verify": "audit_agent", "write_memory": "memory_writer"},
         )
-        builder.add_edge("verifier", "memory_writer")
+        builder.add_edge("audit_agent", "memory_writer")
         builder.add_edge("memory_writer", END)
         return builder.compile()
+
+    def _main_agent(self, state: PaperAgentState) -> PaperAgentState:
+        planned = self._plan(state)
+        route = self._route_after_planner(planned)
+        next_agent = "retrieval_agent" if route == "retrieve" else "answer_agent"
+        detail = (
+            f"needs_retrieval={bool(planned.get('needs_retrieval'))}; "
+            f"intent={planned.get('intent') or ''}; "
+            f"retrieval_strategy={planned.get('retrieval_strategy') or 'no_retrieval'}"
+        )
+        return self._record_agent_call(
+            planned,
+            agent="main_agent",
+            action="route_request",
+            detail=detail,
+            next_agent=next_agent,
+        )
+
+    def _route_after_main_agent(self, state: PaperAgentState) -> str:
+        return self._route_after_planner(state)
+
+    def _retrieval_agent(self, state: PaperAgentState) -> PaperAgentState:
+        result = self._retrieve(state)
+        detail = (
+            f"strategy={result.get('retrieval_strategy') or ''}; "
+            f"pipeline={result.get('retrieval_pipeline') or ''}; "
+            f"evidence_count={len(result.get('evidence') or [])}"
+        )
+        return self._record_agent_call(
+            result,
+            agent="retrieval_agent",
+            action="retrieve_evidence",
+            detail=detail,
+            next_agent="retrieval_agent",
+        )
+
+    def _retrieval_agent_evidence_audit(self, state: PaperAgentState) -> PaperAgentState:
+        result = self._judge_evidence(state)
+        route = self._route_after_evidence_judge(result)
+        next_agent = "retrieval_agent" if route == "retry_retrieve" else "answer_agent"
+        detail = (
+            f"evidence_quality={result.get('evidence_quality') or ''}; "
+            f"kept_evidence={len(result.get('evidence') or [])}; "
+            f"judgments={len(result.get('evidence_judgments') or [])}"
+        )
+        return self._record_agent_call(
+            result,
+            agent="retrieval_agent",
+            action="screen_evidence",
+            detail=detail,
+            next_agent=next_agent,
+        )
+
+    def _retrieval_agent_refine(self, state: PaperAgentState) -> PaperAgentState:
+        result = self._refine_retrieval(state)
+        detail = (
+            f"retry_attempt={int(result.get('retrieval_attempts', 0) or 0)}; "
+            f"top_k={int(result.get('top_k', 0) or 0)}; "
+            f"strategy={result.get('retrieval_strategy') or ''}"
+        )
+        return self._record_agent_call(
+            result,
+            agent="retrieval_agent",
+            action="refine_retrieval",
+            detail=detail,
+            next_agent="retrieval_agent",
+        )
+
+    def _answer_agent(self, state: PaperAgentState) -> PaperAgentState:
+        result = self._answer(state)
+        route = self._route_after_answer(result)
+        next_agent = "audit_agent" if route == "verify" else "memory_writer"
+        detail = (
+            f"answer_strategy={result.get('answer_strategy') or ''}; "
+            f"prompt_evidence={len(result.get('final_prompt_evidence') or [])}; "
+            f"fallback_used={bool(result.get('fallback_used', False))}"
+        )
+        return self._record_agent_call(
+            result,
+            agent="answer_agent",
+            action="compose_answer",
+            detail=detail,
+            next_agent=next_agent,
+        )
+
+    def _audit_agent(self, state: PaperAgentState) -> PaperAgentState:
+        result = self._verify_answer(state)
+        verification = result.get("verification") or {}
+        detail = (
+            f"verification_status={verification.get('status') or ''}; "
+            f"citation_count={verification.get('citation_count') or 0}; "
+            f"weak_citations={len(verification.get('weak_citations') or [])}"
+        )
+        return self._record_agent_call(
+            result,
+            agent="audit_agent",
+            action="verify_answer",
+            detail=detail,
+            next_agent="memory_writer",
+        )
+
+    def _record_agent_call(
+        self,
+        state: PaperAgentState,
+        *,
+        agent: str,
+        action: str,
+        detail: str,
+        next_agent: str,
+    ) -> PaperAgentState:
+        calls = [*state.get("agent_calls", [])]
+        calls.append(
+            {
+                "agent": agent,
+                "action": action,
+                "detail": detail,
+                "next_agent": next_agent,
+            }
+        )
+        return {
+            **state,
+            "agent_calls": calls,
+            "active_agent": next_agent,
+        }
 
     def _route_after_answer(self, state: PaperAgentState) -> str:
         if not state.get("needs_retrieval"):
             return "write_memory"
         answer_strategy = str(state.get("answer_strategy") or "")
-        if answer_strategy in {"model_unavailable", "missing_evidence_refusal"}:
+        if answer_strategy == "model_unavailable":
             return "write_memory"
         answer = state.get("answer", "")
         if state.get("evidence") or self._citation_ids_from_answer(answer):

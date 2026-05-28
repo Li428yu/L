@@ -204,6 +204,7 @@ class RagTrace(BaseModel):
     document_relation_map: list[dict[str, Any]] = Field(default_factory=list)
     multi_document_coverage: dict[str, Any] = Field(default_factory=dict)
     visual_ocr_warnings: list[dict[str, Any]] = Field(default_factory=list)
+    agent_calls: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AskRequest(BaseModel):

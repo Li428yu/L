@@ -86,8 +86,8 @@ class AgentRetrievalMixin(
             )
         runtime_steps.append(
             RuntimeStep(
-                node="retriever",
-                title="检索证据",
+                    node="retrieval_agent",
+                    title="检索 Agent 查找证据",
                 detail=(
                     f"实际使用「{self._friendly_retrieval_strategy(strategy)}」，"
                     f"管线为 {retrieval_pipeline}，排序方式为 {ranking_method}；"
@@ -153,56 +153,18 @@ class AgentRetrievalMixin(
                 queries.append(cleaned)
 
         add(question)
+        keyphrases = self._question_keyphrases(question)
+        if keyphrases:
+            add(f"{question} {' '.join(keyphrases[:6])}")
         for item in soft_intent.get("focus", [])[:4]:
             add(f"{question} {item}")
 
-        normalized = question.lower()
-        if self._looks_like_broad_overview_question(question) or any(term in question for term in ["概括", "核心贡献", "主要贡献"]):
-            add(f"{question} abstract introduction contribution proposed approach conclusion")
-        if any(term in question for term in ["方法", "机制", "结构", "架构", "组成", "作用", "流程"]) or any(
-            term in normalized for term in ["method", "architecture", "objective"]
-        ):
-            add(f"{question} method architecture objective model design")
-        if self._looks_like_metric_result_question(question):
-            add(f"{question} result results table benchmark score accuracy BLEU GLUE SQuAD ISBI error")
-        if self._looks_like_visual_retrieval_question(question):
-            add(f"{question} figure fig caption architecture diagram")
-        if any(term in question for term in ["局限", "代价", "不足", "限制"]) or "limitation" in normalized:
-            add(f"{question} limitation drawback cost reduced resolution")
-        if any(term in question for term in ["语料", "数据", "训练"]) or any(term in normalized for term in ["corpus", "training"]):
-            add(f"{question} training corpus dataset pre-training data augmentation")
-        if any(term in question for term in ["拒", "证明", "是否"]) or any(term in normalized for term in ["prove", "evidence"]):
-            add(f"{question} task scope evidence domain result")
+        for role in self._paper_structure_roles_for_question(question, soft_intent=soft_intent):
+            terms = self._paper_structure_role_terms(role, kind="query")[:10]
+            if terms:
+                add(f"{question} {' '.join(terms)}")
 
-        aliases: list[str] = []
-        metric_question = self._looks_like_metric_result_question(question)
-        visual_question = self._looks_like_visual_retrieval_question(question)
-        training_question = any(term in question for term in ["语料", "数据", "训练"]) or any(term in normalized for term in ["corpus", "training"])
-        for document_id in document_ids:
-            document = self.store.get_document(document_id)
-            name = (document.file_name if document else "").lower()
-            if "attention-is-all-you-need" in name:
-                aliases.append("Transformer new simple network architecture attention mechanisms sequence transduction")
-                aliases.append("The Transformer model architecture entirely on attention replacing recurrent layers multi-head attention")
-                if metric_question:
-                    aliases.append("Transformer WMT 2014 English-to-German 28.4 BLEU English-to-French 41.0 BLEU Table 2")
-            elif "bert" in name:
-                aliases.append("BERT Bidirectional Encoder Representations deep bidirectional representations")
-                aliases.append("BERT masked language model next sentence prediction pre-training fine-tuning")
-                if metric_question:
-                    aliases.append("BERT GLUE 80.5 SQuAD v1.1 93.2 MultiNLI 86.7 benchmark")
-                if training_question:
-                    aliases.append("BERT BooksCorpus English Wikipedia pre-training corpus")
-            elif "unet" in name or "u-net" in name:
-                aliases.append("U-Net biomedical image segmentation contracting path expansive path")
-                aliases.append("U-Net overlap-tile strategy data augmentation elastic deformations")
-                if metric_question:
-                    aliases.append("U-Net ISBI warping error Rand error pixel error EM segmentation challenge")
-                if visual_question:
-                    aliases.append("U-Net Figure 1 contracting path expansive path u-shaped architecture")
-        for alias in aliases:
-            add(f"{question} {alias}")
-        return queries[:5]
+        return queries[:6]
 
     def _scope_document_ids_by_question(
         self,
@@ -282,72 +244,36 @@ class AgentRetrievalMixin(
         return score
 
     def _document_aliases(self, file_name: str) -> list[tuple[str, float]]:
-        normalized_name = self._normalize_document_mention_text(file_name)
         aliases: list[tuple[str, float]] = []
 
         def add(alias: str, weight: float = 1.8) -> None:
-            if alias:
+            if alias and alias not in {value for value, _ in aliases}:
                 aliases.append((alias, weight))
 
-        if "nist ai rmf" in normalized_name:
-            add("NIST AI RMF", 3.0)
-            add("AI RMF 1.0", 3.0)
-            add("AI Risk Management Framework", 2.6)
-            add("人工智能风险管理框架", 2.4)
-        if "cybersecurity framework" in normalized_name:
-            add("NIST Cybersecurity Framework", 3.0)
-            add("Cybersecurity Framework 2.0", 2.8)
-            add("CSF 2.0", 3.0)
-            add("CSF", 1.8)
-            add("网络安全框架", 2.4)
-        if "attention is all you need" in normalized_name:
-            add("Attention Is All You Need", 3.2)
-            add("Attention paper", 2.4)
-            add("Attention论文", 2.4)
-            add("Transformer architecture", 1.7)
-            add("Transformer 架构", 1.7)
-        if "bert" in normalized_name:
-            add("BERT", 3.0)
-            add("Bidirectional Encoder Representations", 2.5)
-        if "clip" in normalized_name:
-            add("CLIP", 3.0)
-            add("Contrastive Language-Image Pre-Training", 2.5)
-            add("Contrastive Language Image Pretraining", 2.5)
-        if "gpt2" in normalized_name or "gpt 2" in normalized_name:
-            add("GPT-2", 3.0)
-            add("GPT2", 3.0)
-            add("WebText", 1.8)
-        if "segment anything" in normalized_name:
-            add("Segment Anything", 3.0)
-            add("SAM", 2.2)
-            add("SA-1B", 2.4)
-        if "ocrmypdf" in normalized_name or "cardinal" in normalized_name:
-            add("ocrmypdf_cardinal_scanned", 3.0)
-            add("cardinal scanned", 2.5)
-            add("扫描型 PDF", 2.0)
-            add("scanned pdf", 2.0)
-        if "网络程序设计实验一" in file_name:
-            add("网络程序设计实验一", 3.2)
-            add("实验一", 2.0)
-            add("TCP通信", 2.0)
-            add("network programming experiment 1", 3.0)
-            add("experiment 1", 1.8)
-            add("tcp echo experiment", 2.6)
-            add("tcp communication experiment", 2.4)
-        if "网络程序设计实验二" in file_name:
-            add("网络程序设计实验二", 3.2)
-            add("实验二", 2.0)
-            add("端口扫描", 2.2)
-            add("network programming experiment 2", 3.0)
-            add("experiment 2", 1.8)
-            add("port scanning experiment", 2.8)
-            add("port scan experiment", 2.8)
+        stem = re.sub(r"\.[A-Za-z0-9]+$", "", file_name)
+        normalized_stem = self._normalize_document_mention_text(stem)
+        add(normalized_stem, 2.2)
+        compact_stem = normalized_stem.replace(" ", "")
+        if len(compact_stem) >= 8:
+            add(compact_stem, 1.8)
+
+        tokens = [
+            token
+            for token in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]{2,}", normalized_stem)
+            if token not in self._document_mention_stopwords()
+        ]
+        if 2 <= len(tokens) <= 8:
+            initials = "".join(token[0] for token in tokens if re.match(r"[a-z]", token))
+            if 2 <= len(initials) <= 10:
+                add(initials, 1.4)
+        for size in range(2, min(4, len(tokens)) + 1):
+            for start in range(0, len(tokens) - size + 1):
+                add(" ".join(tokens[start : start + size]), 1.2)
 
         return aliases
 
     def _normalize_document_mention_text(self, text: str) -> str:
         normalized = str(text).lower()
-        normalized = normalized.replace("gpt-2", "gpt2").replace("sa-1b", "sa1b")
         normalized = re.sub(r"[_\-–—/\\.:：,，;；()（）\[\]【】《》“”\"'!?！？]+", " ", normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return normalized
@@ -370,7 +296,6 @@ class AgentRetrievalMixin(
             "models",
             "model",
             "pretraining",
-            "transformers",
             "framework",
             "network",
             "programming",
@@ -755,8 +680,8 @@ class AgentRetrievalMixin(
             "runtime": [
                 *state.get("runtime", []),
                 RuntimeStep(
-                    node="retrieval_refiner",
-                    title="调整检索",
+                    node="retrieval_agent",
+                    title="检索 Agent 调整策略",
                     detail=detail,
                 ),
             ],
@@ -1036,6 +961,32 @@ class AgentRetrievalMixin(
             )
         if intent == "compare_question" or scope == "multi_document" or self._looks_like_multi_document_topic_question(question):
             extend("compare", self._comparison_evidence(document_ids=document_ids, top_k=top_k), 0.2)
+        structure_roles = [
+            role
+            for role in self._paper_structure_roles_for_question(question, soft_intent=soft_intent)
+            if role not in {"field", "reference"}
+        ]
+        if structure_roles:
+            extend(
+                "paper_structure",
+                self._paper_structure_evidence(
+                    question=question,
+                    document_ids=document_ids,
+                    top_k=top_k,
+                    roles=structure_roles,
+                ),
+                0.28,
+            )
+            extend(
+                "paper_salient",
+                self._paper_salient_evidence(
+                    question=question,
+                    document_ids=document_ids,
+                    top_k=top_k,
+                    roles=structure_roles,
+                ),
+                0.18,
+            )
         if self._looks_like_framework_function_question(question):
             extend(
                 "framework_functions",
@@ -1084,15 +1035,14 @@ class AgentRetrievalMixin(
                     top_k=top_k,
                     terms=[
                         "pre-training objective",
-                        "masked language model",
-                        "masked",
-                        "MLM",
-                        "next sentence prediction",
-                        "next sentence",
-                        "NSP",
-                        "15%",
+                        "training objective",
+                        "objective function",
+                        "self-supervised",
+                        "supervised objective",
+                        "pretext task",
+                        "loss function",
                     ],
-                    bonus_phrases=["masked language model", "next sentence prediction", "pre-training tasks"],
+                    bonus_phrases=["pre-training objective", "training objective", "loss function"],
                     min_hits=2,
                     score_source="pretraining_objective_rule",
                 ),
@@ -1109,25 +1059,21 @@ class AgentRetrievalMixin(
                         "dataset",
                         "training set",
                         "pre-training dataset",
-                        "WebText",
-                        "Reddit",
-                        "outbound links",
-                        "8 million",
-                        "400 million",
+                        "training data",
+                        "corpus",
+                        "data collection",
+                        "data source",
+                        "samples",
                         "image-text",
                         "pairs",
-                        "SA-1B",
-                        "1.1B",
-                        "1B masks",
-                        "billion masks",
-                        "11M",
+                        "million",
+                        "billion",
                         "data engine",
                     ],
                     bonus_phrases=[
-                        "over 1 billion masks",
-                        "11M licensed",
-                        "400 million",
-                        "outbound links from Reddit",
+                        "training set",
+                        "pre-training dataset",
+                        "data collection",
                         "image-text pairs",
                     ],
                     min_hits=2,
@@ -1143,34 +1089,27 @@ class AgentRetrievalMixin(
                     document_ids=document_ids,
                     top_k=top_k,
                     terms=[
-                        "BLEU",
-                        "WMT 2014",
-                        "English-to-German",
-                        "English-to-French",
-                        "EN-DE",
-                        "EN-FR",
-                        "28.4",
-                        "41.8",
+                        "Table 1",
                         "Table 2",
                         "Table 3",
-                        "Table 1",
-                        "maximum path",
-                        "sequential operations",
-                        "complexity per layer",
-                        "layer type",
-                        "zero-shot",
+                        "benchmark",
+                        "metric",
+                        "score",
+                        "result",
                         "accuracy",
+                        "error",
+                        "F1",
+                        "AUC",
+                        "zero-shot",
                         "perplexity",
+                        "state-of-the-art",
                     ],
                     bonus_phrases=[
-                        "Table 1",
-                        "Maximum path lengths",
-                        "Sequential Operations",
-                        "Complexity per Layer",
-                        "Table 2",
-                        "Table 3",
-                        "28.4",
-                        "41.8",
+                        "state-of-the-art",
+                        "outperforms",
+                        "results are shown",
+                        "experimental results",
+                        "benchmark results",
                     ],
                     min_hits=2,
                     score_source="metric_result_rule",
@@ -1223,25 +1162,10 @@ class AgentRetrievalMixin(
         )
         has_framework_scope = any(
             keyword in normalized
-            for keyword in ["nist", "rmf", "csf", "framework", "框架"]
+            for keyword in ["framework", "框架", "model", "system", "method"]
         )
-        function_names = [
-            "govern",
-            "map",
-            "measure",
-            "manage",
-            "identify",
-            "protect",
-            "detect",
-            "respond",
-            "recover",
-        ]
-        asks_named_function_role = (
-            has_framework_scope
-            and any(term in normalized for term in function_names)
-            and any(keyword in normalized for keyword in ["作用", "角色", "role", "function"])
-        )
-        return has_framework_scope and (has_function_intent or asks_named_function_role)
+        asks_component_role = any(keyword in normalized for keyword in ["作用", "角色", "role", "component", "stage"])
+        return has_framework_scope and (has_function_intent or asks_component_role)
 
     def _looks_like_trustworthy_characteristics_question(self, question: str) -> bool:
         normalized = question.lower()
@@ -1253,7 +1177,7 @@ class AgentRetrievalMixin(
         normalized = question.lower()
         return any(keyword in normalized for keyword in ["预训练目标", "pre-training objective", "pretraining objective"]) or (
             any(keyword in normalized for keyword in ["预训练", "pre-training", "pretraining"])
-            and any(keyword in normalized for keyword in ["目标", "objective", "mlm", "nsp"])
+            and any(keyword in normalized for keyword in ["目标", "objective", "goal", "loss", "task"])
         )
 
     def _looks_like_dataset_or_scale_question(self, question: str) -> bool:
@@ -1266,8 +1190,10 @@ class AgentRetrievalMixin(
                 "数据规模",
                 "规模",
                 "dataset",
-                "webtext",
-                "sa-1b",
+                "corpus",
+                "training set",
+                "data scale",
+                "samples",
                 "多少",
                 "构建",
             ]
@@ -1275,7 +1201,22 @@ class AgentRetrievalMixin(
 
     def _looks_like_metric_result_question(self, question: str) -> bool:
         normalized = question.lower()
-        return any(keyword in normalized for keyword in ["bleu", "wmt", "结果", "result", "table", "表格", "指标"])
+        return any(
+            keyword in normalized
+            for keyword in [
+                "结果",
+                "result",
+                "results",
+                "table",
+                "表格",
+                "指标",
+                "metric",
+                "score",
+                "accuracy",
+                "error",
+                "benchmark",
+            ]
+        )
 
     def _keyword_rule_evidence(
         self,
@@ -1335,6 +1276,208 @@ class AgentRetrievalMixin(
         scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
         return [item for _, _, item in scored[: max(top_k, 1)]]
 
+    def _paper_structure_evidence(
+        self,
+        *,
+        question: str,
+        document_ids: list[str],
+        top_k: int,
+        roles: list[str],
+    ) -> list[EvidenceItem]:
+        normalized_roles = [
+            self._paper_structure_role_alias(role)
+            for role in roles
+            if self._paper_structure_role_alias(role) in self._paper_structure_signal_definitions()
+        ]
+        if not normalized_roles:
+            return []
+
+        scored: list[tuple[float, int, EvidenceItem]] = []
+        position = 0
+        for document_id in document_ids:
+            rows = self.vector_store.get_document_chunks(document_id, limit=1000)
+            total = max(len(rows), 1)
+            for index, row in enumerate(rows):
+                metadata = row.get("metadata") or {}
+                text = self._sanitize_evidence_text(str(row.get("text", "")))
+                if not text.strip():
+                    continue
+                if self._looks_like_reference_section_text(text) and "reference" not in normalized_roles:
+                    continue
+                if self._looks_like_front_matter_noise(text) and "field" not in normalized_roles:
+                    continue
+                section = str(metadata.get("section") or "")
+                role_scores = self._semantic_role_scores(
+                    text=text,
+                    section=section,
+                    index=index,
+                    total=total,
+                )
+                best_role = max(
+                    normalized_roles,
+                    key=lambda role: role_scores.get(role, 0.0),
+                )
+                best_role_score = role_scores.get(best_role, 0.0)
+                relevance = self._question_relevance_score(question, f"{metadata.get('paper_name', '')}\n{section}\n{text}")
+                if best_role_score < 0.35 and relevance < 0.14:
+                    continue
+
+                chunk_type = str(metadata.get("chunk_type") or "").lower()
+                score = 0.58 + min(0.26, best_role_score * 0.12) + relevance * 0.32
+                score += self._readable_text_score(text) * 0.08
+                if "table" in normalized_roles and ("table" in chunk_type or self._is_table_like_text(text)):
+                    score += 0.12
+                if "visual" in normalized_roles and any(marker in chunk_type for marker in ["image", "figure", "chart"]):
+                    score += 0.14
+                if best_role in {"purpose", "conclusion"} and index <= max(2, int(total * 0.08)):
+                    score += 0.08
+
+                item = self._evidence_from_row(
+                    row,
+                    document_id,
+                    score=min(1.0, score),
+                    rule_score=min(1.0, score),
+                    final_score=min(1.0, score),
+                    score_source=f"paper_structure_{best_role}",
+                )
+                item.quote = self._best_quote_for_question(question, item.text)
+                scored.append((score, position, item))
+                position += 1
+
+        scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        return [item for _, _, item in scored[: max(top_k, 1)]]
+
+    def _paper_salient_evidence(
+        self,
+        *,
+        question: str,
+        document_ids: list[str],
+        top_k: int,
+        roles: list[str],
+    ) -> list[EvidenceItem]:
+        normalized_question = " ".join(self._sanitize_evidence_text(question).lower().split())
+        phrases = self._question_keyphrases(question)
+        keywords = self._question_keywords(question)
+        normalized_roles = [
+            self._paper_structure_role_alias(role)
+            for role in roles
+            if self._paper_structure_role_alias(role) in self._paper_structure_signal_definitions()
+        ]
+        if not normalized_roles:
+            normalized_roles = ["purpose", "approach", "claim"]
+
+        scored: list[tuple[float, int, EvidenceItem]] = []
+        position = 0
+        for document_id in document_ids:
+            rows = self.vector_store.get_document_chunks(document_id, limit=1000)
+            total = max(len(rows), 1)
+            for index, row in enumerate(rows):
+                metadata = row.get("metadata") or {}
+                text = self._sanitize_evidence_text(str(row.get("text", "")))
+                if not text.strip():
+                    continue
+                if self._looks_like_reference_section_text(text):
+                    continue
+                if self._looks_like_front_matter_noise(text):
+                    continue
+
+                section = str(metadata.get("section") or "")
+                normalized_text = " ".join(text.lower().split())
+                phrase_text = normalized_text.replace("-", " ")
+                phrase_hits = sum(1 for phrase in phrases if phrase in phrase_text)
+                keyword_hits = sum(1 for term in keywords[:16] if term.lower() in normalized_text)
+                role_scores = self._semantic_role_scores(
+                    text=text,
+                    section=section,
+                    index=index,
+                    total=total,
+                )
+                role_score = max((role_scores.get(role, 0.0) for role in normalized_roles), default=0.0)
+                relevance = self._question_relevance_score(question, f"{metadata.get('paper_name', '')}\n{section}\n{text}")
+                salient_bonus = self._paper_salient_signal_bonus(
+                    question=normalized_question,
+                    text=normalized_text,
+                    section=section,
+                    index=index,
+                    total=total,
+                )
+                score = (
+                    relevance * 1.25
+                    + min(phrase_hits, 3) * 0.38
+                    + min(keyword_hits, 5) * 0.08
+                    + role_score * 0.42
+                    + salient_bonus
+                    + self._readable_text_score(text) * 0.12
+                )
+                if score < 0.72:
+                    continue
+
+                item = self._evidence_from_row(
+                    row,
+                    document_id,
+                    score=min(1.0, 0.56 + score * 0.18),
+                    rule_score=min(1.0, 0.56 + score * 0.18),
+                    final_score=min(1.0, 0.56 + score * 0.18),
+                    score_source="paper_salient",
+                )
+                item.quote = self._best_quote_for_question(question, item.text)
+                scored.append((score, position, item))
+                position += 1
+
+        scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        return [item for _, _, item in scored[: max(top_k, 1)]]
+
+    def _paper_salient_signal_bonus(
+        self,
+        *,
+        question: str,
+        text: str,
+        section: str,
+        index: int,
+        total: int,
+    ) -> float:
+        score = 0.0
+        early = index <= max(2, int(max(total, 1) * 0.08))
+        section_normalized = section.lower()
+        if "abstract" in question and (early or "abstract" in section_normalized or "abstract" in text[:120]):
+            score += 0.45
+        if any(term in question for term in ["main idea", "idea", "method", "approach", "mechanism", "adaptation"]):
+            if any(
+                phrase in text
+                for phrase in [
+                    "we propose",
+                    "we introduce",
+                    "we present",
+                    "we define",
+                    "is designed to",
+                    "allows us",
+                    "consists of",
+                    "based on",
+                ]
+            ):
+                score += 0.48
+        if any(term in question for term in ["result", "results", "benchmark", "performance", "report", "reported"]):
+            if any(
+                phrase in text
+                for phrase in [
+                    "results show",
+                    "we show",
+                    "we demonstrate",
+                    "achieves",
+                    "outperforms",
+                    "state-of-the-art",
+                    "accuracy",
+                    "error",
+                ]
+            ):
+                score += 0.42
+        if any(term in question for term in ["efficiency", "efficient", "benefit", "benefits", "faster", "smaller", "memory", "parameter"]):
+            if any(term in text for term in ["efficient", "efficiency", "faster", "smaller", "memory", "parameters", "compute", "storage"]):
+                score += 0.42
+            if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|times|m|b|k|million|billion)?\b", text):
+                score += 0.2
+        return score
+
     def _framework_function_evidence(
         self,
         *,
@@ -1343,15 +1486,23 @@ class AgentRetrievalMixin(
         top_k: int,
     ) -> list[EvidenceItem]:
         function_terms = [
-            "govern",
-            "map",
-            "measure",
-            "manage",
-            "identify",
-            "protect",
-            "detect",
-            "respond",
-            "recover",
+            "function",
+            "functions",
+            "core",
+            "component",
+            "components",
+            "capability",
+            "capabilities",
+            "stage",
+            "stages",
+            "process",
+            "processes",
+            "role",
+            "roles",
+            "policy",
+            "strategy",
+            "outcome",
+            "outcomes",
         ]
         expected_terms = self._expected_framework_function_terms(question)
         scored: list[tuple[float, int, EvidenceItem]] = []
@@ -1372,9 +1523,9 @@ class AgentRetrievalMixin(
                     continue
 
                 score = 0.72 + min(0.22, len(set(hits)) * 0.04)
-                if any(marker in normalized_text for marker in ["core", "function", "functions", "categories"]):
+                if any(marker in normalized_text for marker in ["core", "function", "functions", "component", "components", "categories"]):
                     score += 0.16
-                if any(marker in normalized_text for marker in ["composed of four functions", "six functions", "functions organize"]):
+                if any(marker in normalized_text for marker in ["composed of", "consists of", "organized into", "functions organize"]):
                     score += 0.24
                 chunk_type = str(metadata.get("chunk_type") or "").lower()
                 if any(marker in chunk_type for marker in ["image", "figure", "table"]):

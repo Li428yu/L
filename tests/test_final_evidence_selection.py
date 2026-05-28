@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from backend.app.agent_parts.answering import AgentAnsweringMixin
 from backend.app.agent_parts.retrieval import AgentRetrievalMixin
@@ -40,7 +41,7 @@ class FinalEvidenceHarness(
 
     def _looks_like_framework_function_question(self, question: str) -> bool:
         normalized = question.lower()
-        return "function" in normalized and ("csf" in normalized or "rmf" in normalized or "framework" in normalized)
+        return "function" in normalized and any(term in normalized for term in ["framework", "model", "system"])
 
     def _looks_like_trustworthy_characteristics_question(self, question: str) -> bool:
         normalized = question.lower()
@@ -48,7 +49,7 @@ class FinalEvidenceHarness(
 
     def _looks_like_metric_result_question(self, question: str) -> bool:
         normalized = question.lower()
-        return any(term in normalized for term in ["bleu", "wmt", "table", "result"])
+        return any(term in normalized for term in ["table", "result", "metric", "score", "accuracy", "error", "benchmark"])
 
     def _looks_like_pretraining_objective_question(self, question: str) -> bool:
         normalized = question.lower()
@@ -79,6 +80,22 @@ class MultiDocumentEvidenceHarness(FinalEvidenceHarness):
 
 class VisualQuestionHarness(AgentAnsweringMixin, AgentRetrievalMixin, AgentTextUtilityMixin):
     pass
+
+
+class AnswerPlanHarness(FinalEvidenceHarness):
+    settings = SimpleNamespace(force_model_answer=False)
+
+    def _format_question_understanding_for_model(self, **kwargs) -> str:
+        return "specific paper question"
+
+    def _evidence_coverage_decision(self, **kwargs) -> dict:
+        return {}
+
+    def _should_decline_for_missing_direct_evidence(self, question: str, evidence: list[EvidenceItem]) -> bool:
+        return False
+
+    def _overview_focus_keywords(self, question: str) -> list[str]:
+        return self._question_keywords(question)
 
 
 def make_evidence(
@@ -127,19 +144,18 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
     def test_unsupported_medical_proof_question_gets_clear_refusal(self) -> None:
         harness = FinalEvidenceHarness()
         evidence = make_evidence(
-            "csf-scope",
+            "scope",
             citation_id="E1",
-            text="The Cybersecurity Framework helps organizations manage cybersecurity risk.",
+            text="The uploaded document describes deployment requirements for a manufacturing sensor system.",
         )
 
         answer = harness._build_unsupported_proof_refusal_answer(
-            question="Does NIST CSF 2.0 prove that a medical diagnosis model improved accuracy?",
+            question="Does this document prove that a medical diagnosis model improved accuracy?",
             evidence=[evidence],
         )
 
         self.assertIn("不能证明", answer)
-        self.assertIn("medical diagnosis", answer)
-        self.assertIn("accuracy", answer)
+        self.assertIn("证据", answer)
         self.assertIn("[E1]", answer)
 
     def test_model_failure_for_unsupported_proof_returns_refusal_not_api_only(self) -> None:
@@ -149,12 +165,12 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
             citation_id="E1",
             chunk_type="image",
             image_id="img-1",
-            text="图片实际内容 这是 LinnSequencer 32 轨 MIDI 序列录音机的产品说明页。",
+            text="图片实际内容 这是一页工业传感器安装手册，包含接线图和维护说明。",
         )
 
         plan = harness._model_failure_answer_plan(
             {
-                "question": "Can ocrmypdf_cardinal_scanned.pdf prove that GPT-2 achieved new SOTA on LAMBADA?",
+                "question": "Can this scanned product page prove that a medical diagnosis model improved accuracy?",
                 "needs_retrieval": True,
                 "evidence": [evidence],
             },
@@ -171,8 +187,95 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
         self.assertEqual(plan.answer_strategy, "missing_evidence_refusal")
         self.assertTrue(plan.fallback_used)
         self.assertIn("不能证明", plan.local_answer)
-        self.assertIn("LinnSequencer", plan.local_answer)
-        self.assertIn("GPT-2", plan.local_answer)
+        self.assertIn("[E1]", plan.local_answer)
+
+    def test_prepare_answer_plan_uses_model_for_normal_evidence_questions(self) -> None:
+        harness = AnswerPlanHarness()
+        evidence = make_evidence(
+            "method-quote",
+            citation_id="E1",
+            score=1.0,
+            text="The method architecture uses a lightweight encoder and a scoring head.",
+        )
+
+        plan = harness._prepare_answer_plan(
+            {
+                "question": "What method architecture does the approach use?",
+                "needs_retrieval": True,
+                "evidence": [evidence],
+                "soft_intent": {"operation": "answer", "scope": "specific_point"},
+                "retrieval_strategy": "hybrid_soft",
+                "recent_messages": [],
+                "memory_prompt": "",
+            }
+        )
+
+        self.assertEqual(plan.mode, "model")
+        self.assertEqual(plan.answer_strategy, "model_answer")
+        self.assertIn("[E1]", plan.user_prompt)
+        self.assertIn("关键术语", plan.user_prompt)
+
+    def test_model_failure_uses_local_structured_answer_only_as_fallback(self) -> None:
+        harness = AnswerPlanHarness()
+        evidence = make_evidence(
+            "method-quote",
+            citation_id="E1",
+            score=1.0,
+            text="The method architecture uses a lightweight encoder and a scoring head.",
+        )
+
+        fallback = harness._model_failure_answer_plan(
+            {
+                "question": "What method architecture does the approach use?",
+                "needs_retrieval": True,
+                "evidence": [evidence],
+            },
+            AnswerPlan(
+                mode="model",
+                answer_strategy="model_answer",
+                runtime_detail="",
+                final_prompt_evidence=["[E1] paper.pdf p.1 score=1.000"],
+                prompt_evidence=[evidence],
+            ),
+            RuntimeError("chat unavailable"),
+        )
+
+        self.assertEqual(fallback.answer_strategy, "local_fallback_answer")
+        self.assertTrue(fallback.fallback_used)
+        self.assertIn("[E1]", fallback.local_answer)
+
+    def test_prepare_answer_plan_refuses_cross_scope_proof_claims(self) -> None:
+        harness = AnswerPlanHarness()
+        evidence = make_evidence(
+            "source-scope",
+            citation_id="E1",
+            score=1.0,
+            text=(
+                "The method is designed to address dense object detection scenarios "
+                "with severe class imbalance during training."
+            ),
+        )
+
+        plan = harness._prepare_answer_plan(
+            {
+                "question": (
+                    "Does this paper prove that low-rank adaptation reduces trainable parameters "
+                    "in language model fine-tuning?"
+                ),
+                "needs_retrieval": True,
+                "evidence": [evidence],
+                "soft_intent": {"operation": "judge", "scope": "specific_point"},
+                "retrieval_strategy": "hybrid_soft",
+                "recent_messages": [],
+                "memory_prompt": "",
+            }
+        )
+
+        self.assertEqual(plan.answer_strategy, "missing_evidence_refusal")
+        self.assertIn("不能证明", plan.local_answer)
+        self.assertIn("low-rank adaptation", plan.local_answer)
+        self.assertIn("language model", plan.local_answer)
+        self.assertIn("object detection", plan.local_answer)
 
     def test_framework_text_evidence_replaces_image_for_non_visual_question(self) -> None:
         harness = FinalEvidenceHarness()
@@ -181,19 +284,19 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
             score=0.95,
             chunk_type="figure_image",
             image_id="img-1",
-            text="Fig. 2 shows CSF Functions: GOVERN, IDENTIFY, PROTECT, DETECT, RESPOND, and RECOVER.",
+            text="Fig. 2 shows framework functions: PLAN, BUILD, REVIEW, and MONITOR.",
         )
         text = make_evidence(
             "text-core",
             score=0.82,
             text=(
-                "The CSF Core Functions - GOVERN, IDENTIFY, PROTECT, DETECT, RESPOND, and RECOVER - "
-                "organize cybersecurity outcomes at their highest level."
+                "The framework core functions - PLAN, BUILD, REVIEW, and MONITOR - "
+                "organize implementation outcomes at their highest level."
             ),
         )
 
         repaired = harness._repair_final_evidence_selection(
-            question="What are the NIST CSF core functions?",
+            question="What are the framework core functions?",
             selected=[image],
             candidates=[image, text],
             limit=1,
@@ -351,32 +454,218 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
 
         self.assertIn("direct-core", [item.chunk_id for item in prompt_evidence])
 
+    def test_prompt_evidence_dedupes_repeated_quotes_and_keeps_distinct_support(self) -> None:
+        harness = FinalEvidenceHarness()
+        duplicate_text = "The method uses a scoring module to select candidate outputs for the final decision."
+        duplicate_a = make_evidence("duplicate-a", citation_id="E1", score=1.0, text=duplicate_text)
+        duplicate_b = make_evidence("duplicate-b", citation_id="E2", score=0.99, text=duplicate_text)
+        distinct = make_evidence(
+            "distinct-method",
+            citation_id="E3",
+            score=0.74,
+            text="The approach is designed to freeze base weights and add low rank matrix updates for adaptation.",
+        )
+        filler = make_evidence("filler", citation_id="E4", score=0.6, text="Additional background context.")
+
+        prompt_evidence = harness._select_model_prompt_evidence(
+            question="What method adaptation idea does the approach use?",
+            evidence=[duplicate_a, duplicate_b, distinct, filler],
+            soft_intent={},
+        )
+        chunk_ids = [item.chunk_id for item in prompt_evidence]
+
+        self.assertIn("distinct-method", chunk_ids)
+        self.assertLessEqual(len({"duplicate-a", "duplicate-b"} & set(chunk_ids)), 1)
+
+    def test_resource_question_prefers_summary_claim_with_measured_benefits(self) -> None:
+        harness = FinalEvidenceHarness()
+        summary = make_evidence(
+            "summary-benefits",
+            score=0.86,
+            text=(
+                "Abstract We propose a parameter-efficient method that reduces trainable "
+                "parameters by 10,000 times and the memory requirement by 3 times while "
+                "keeping higher training throughput."
+            ),
+        )
+        summary.section = "Abstract"
+        decoy = make_evidence(
+            "budget-table",
+            score=1.0,
+            text="Appendix table lists parameter budgets of 4.7M and 37.7M for several settings.",
+        )
+        decoy.section = "Methods"
+
+        selected = harness._filter_evidence_for_question(
+            "What efficiency benefits does the abstract report?",
+            [decoy, summary],
+            top_k=1,
+        )
+
+        self.assertEqual(selected[0].chunk_id, "summary-benefits")
+        self.assertIn("10,000 times", selected[0].quote)
+        self.assertIn("3 times", selected[0].quote)
+
+    def test_resource_question_detection_does_not_match_inside_method_name(self) -> None:
+        harness = FinalEvidenceHarness()
+
+        self.assertFalse(
+            harness._looks_like_efficiency_or_resource_question(
+                "How does EfficientNet describe its compound scaling method?"
+            )
+        )
+
+    def test_abstract_scoped_resource_question_keeps_prompt_focused(self) -> None:
+        harness = FinalEvidenceHarness()
+        summary = make_evidence(
+            "summary-benefits",
+            score=0.86,
+            text=(
+                "Abstract We propose a parameter-efficient method that reduces trainable "
+                "parameters by 10,000 times and the memory requirement by 3 times."
+            ),
+        )
+        summary.section = "Abstract"
+        supporting = make_evidence(
+            "supporting-resource",
+            score=1.0,
+            text="The method also improves storage efficiency and throughput in downstream adaptation.",
+        )
+        decoy = make_evidence(
+            "resource-background",
+            score=1.0,
+            text="Background discussion mentions parameters, memory, compute, and several unrelated budgets.",
+        )
+
+        selected = harness._filter_evidence_for_question(
+            "What efficiency benefits does the abstract report?",
+            [supporting, decoy, summary],
+            top_k=5,
+        )
+
+        self.assertLessEqual(len(selected), 2)
+        self.assertEqual(selected[0].chunk_id, "summary-benefits")
+
+    def test_adaptation_question_prefers_definition_over_experiment_context(self) -> None:
+        harness = FinalEvidenceHarness()
+        definition = make_evidence(
+            "adaptation-definition",
+            score=0.88,
+            text=(
+                "Abstract We propose an adaptation approach that freezes pretrained weights "
+                "and injects trainable rank decomposition matrices into each layer for "
+                "downstream tasks."
+            ),
+        )
+        definition.section = "Abstract"
+        experiment = make_evidence(
+            "experiment-context",
+            score=1.0,
+            text="Results compare several methods on validation accuracy and parameter budgets.",
+        )
+        experiment.section = "Methods"
+
+        selected = harness._filter_evidence_for_question(
+            "What is the main adaptation idea?",
+            [experiment, definition],
+            top_k=1,
+        )
+
+        self.assertEqual(selected[0].chunk_id, "adaptation-definition")
+
+    def test_design_training_factor_question_prefers_factor_summary(self) -> None:
+        harness = FinalEvidenceHarness()
+        factor_summary = make_evidence(
+            "factor-summary",
+            score=0.82,
+            text=(
+                "Abstract We systematically study the major components of the framework. "
+                "Composition of data augmentations plays a critical role, a learnable "
+                "nonlinear transformation before the loss improves representations, and "
+                "larger batch sizes with more training steps help."
+            ),
+        )
+        factor_summary.section = "Abstract"
+        decoy = make_evidence(
+            "leaderboard-context",
+            score=1.0,
+            text="Linear evaluation reports top-1 accuracy for several representation models.",
+        )
+        decoy.section = "Introduction"
+
+        selected = harness._filter_evidence_for_question(
+            "Which design or training factors are important for learned representations?",
+            [decoy, factor_summary],
+            top_k=1,
+        )
+
+        self.assertEqual(selected[0].chunk_id, "factor-summary")
+        self.assertIn("critical role", selected[0].quote)
+        self.assertIn("training steps", selected[0].quote)
+
+    def test_model_prompt_marks_evidence_use_for_the_model(self) -> None:
+        harness = FinalEvidenceHarness()
+        evidence = make_evidence(
+            "result",
+            citation_id="E1",
+            score=1.0,
+            text="The result improves accuracy by 5 percent while using fewer trainable parameters.",
+        )
+
+        prompt = harness._format_evidence_for_model_prompt(
+            question="What result and efficiency benefit is reported?",
+            evidence=[evidence],
+        )
+
+        self.assertIn("Use:", prompt)
+        self.assertIn("result or efficiency claim", prompt)
+
+    def test_answer_contract_requires_numeric_efficiency_details(self) -> None:
+        harness = FinalEvidenceHarness()
+
+        contract = harness._answer_contract_for_question(
+            "What efficiency benefits does the abstract report?"
+        )
+
+        self.assertIn("效率/资源问题", contract)
+        self.assertIn("必须原样写出这些数值", contract)
+
+    def test_answer_contract_requires_factor_enumeration(self) -> None:
+        harness = FinalEvidenceHarness()
+
+        contract = harness._answer_contract_for_question(
+            "Which design or training factors are important for learned representations?"
+        )
+
+        self.assertIn("设计/训练因素问题", contract)
+        self.assertIn("逐项列出", contract)
+
     def test_final_repair_keeps_required_visual_candidate(self) -> None:
         harness = FinalEvidenceHarness()
         visual = make_evidence(
-            "sam-figure",
+            "method-figure",
             score=1.0,
             chunk_type="figure_image",
             image_id="img-1",
             text=(
-                "Figure 4: Segment Anything Model (SAM) overview. "
-                "promptable segmentation prompt image valid mask object masks."
+                "Figure 4: Method overview. "
+                "The visual shows input prompts, intermediate masks, and the final validated output."
             ),
         )
         selected = [
-            make_evidence(f"text-{index}", score=1.0, text="Related segmentation background.")
+            make_evidence(f"text-{index}", score=1.0, text="Related method background.")
             for index in range(5)
         ]
 
         repaired = harness._repair_final_evidence_selection(
-            question="Segment Anything 的图片证据如何展示 promptable segmentation？",
+            question="How does the figure show the method's prompt and output flow?",
             selected=selected,
             candidates=[visual, *selected],
             limit=5,
         )
 
-        self.assertEqual(repaired[0].chunk_id, "sam-figure")
-        self.assertTrue(any(item.chunk_id == "sam-figure" for item in repaired))
+        self.assertEqual(repaired[0].chunk_id, "method-figure")
+        self.assertTrue(any(item.chunk_id == "method-figure" for item in repaired))
 
     def test_multi_document_coverage_restores_missing_target_document(self) -> None:
         harness = MultiDocumentEvidenceHarness()
@@ -471,58 +760,103 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
             [item.citation_id for item in selected],
         )
 
+    def test_compare_efficiency_prefers_mechanism_evidence_for_each_document(self) -> None:
+        harness = MultiDocumentEvidenceHarness()
+        efficient_result = make_evidence(
+            "efficient-result",
+            score=1.0,
+            document_id="doc-efficient",
+            paper_name="efficient.pdf",
+            text="The result section reports strong accuracy with fewer parameters and better efficiency.",
+        )
+        efficient_method = make_evidence(
+            "efficient-method",
+            score=0.72,
+            document_id="doc-efficient",
+            paper_name="efficient.pdf",
+            text="The method uses a compound coefficient to scale network width, depth, and resolution.",
+        )
+        adaptation_result = make_evidence(
+            "adaptation-result",
+            score=1.0,
+            document_id="doc-adaptation",
+            paper_name="adaptation.pdf",
+            text="The abstract reports 10,000 times fewer trainable parameters and a lower memory requirement.",
+        )
+        adaptation_method = make_evidence(
+            "adaptation-method",
+            score=0.72,
+            document_id="doc-adaptation",
+            paper_name="adaptation.pdf",
+            text=(
+                "The adaptation approach freezes pre-trained weights and injects trainable rank "
+                "decomposition matrices into model layers."
+            ),
+        )
+
+        selected = harness._filter_evidence_for_question(
+            "Compare how the two approaches pursue efficiency. Use evidence from both papers.",
+            [efficient_result, adaptation_result, efficient_method, adaptation_method],
+            top_k=4,
+            target_document_ids=["doc-efficient", "doc-adaptation"],
+        )
+        selected_chunks = {item.chunk_id for item in selected}
+
+        self.assertIn("efficient-method", selected_chunks)
+        self.assertIn("adaptation-method", selected_chunks)
+        self.assertEqual({"doc-efficient", "doc-adaptation"}, {item.document_id for item in selected})
+
     def test_local_framework_answer_uses_complete_core_evidence(self) -> None:
         harness = FinalEvidenceHarness()
         direct = make_evidence(
             "direct-core",
             citation_id="E2",
             score=0.8,
-            text="AI RMF Core is composed of four functions: GOVERN, MAP, MEASURE, and MANAGE.",
+            text="The evaluation framework core is composed of three functions: PLAN, BUILD, and REVIEW.",
         )
 
         answer = harness._build_local_structured_evidence_answer(
-            question="What are the AI RMF core functions?",
+            question="What are the framework core functions?",
             evidence=[direct],
         )
 
-        self.assertIn("GOVERN、MAP、MEASURE、MANAGE", answer)
+        self.assertIn("PLAN, BUILD, and REVIEW", answer)
         self.assertIn("[E2]", answer)
 
-    def test_local_bleu_answer_requires_table_values(self) -> None:
+    def test_local_metric_answer_keeps_table_values(self) -> None:
         harness = FinalEvidenceHarness()
         table = make_evidence(
-            "table-bleu",
+            "table-metric",
             citation_id="E1",
             score=0.9,
             chunk_type="table",
-            text="Table 2: Transformer (big) 28.4 EN-DE and 41.8 EN-FR BLEU.",
+            text="Table 2: Model XL reports accuracy 84 percent and error 16 percent on the benchmark.",
         )
 
         answer = harness._build_local_structured_evidence_answer(
-            question="What BLEU results are reported in the WMT table?",
+            question="What accuracy and error results are reported in the benchmark table?",
             evidence=[table],
         )
 
-        self.assertIn("28.4 BLEU", answer)
-        self.assertIn("41.8 BLEU", answer)
+        self.assertIn("accuracy 84 percent", answer)
+        self.assertIn("error 16 percent", answer)
         self.assertIn("[E1]", answer)
 
-    def test_local_clip_dataset_answer_uses_exact_pair_scale(self) -> None:
+    def test_local_dataset_answer_uses_exact_scale_from_evidence(self) -> None:
         harness = FinalEvidenceHarness()
         evidence = make_evidence(
-            "clip-scale",
+            "dataset-scale",
             citation_id="E1",
             score=1.0,
-            text="We constructed a new dataset of 400 million (image, text) pairs.",
+            text="We constructed a new training dataset of 12 million paired examples.",
         )
 
         answer = harness._build_local_structured_evidence_answer(
-            question="CLIP 使用了多大规模的图像-文本数据进行训练？",
+            question="What dataset scale was used for training?",
             evidence=[evidence],
         )
 
-        self.assertIn("400 million (image, text) pairs", answer)
-        self.assertIn("CLIP", answer)
+        self.assertIn("12 million paired examples", answer)
         self.assertIn("[E1]", answer)
 
     def test_local_sam_visual_answer_uses_image_evidence(self) -> None:
@@ -551,21 +885,75 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
     def test_local_scanned_cardinal_answer_uses_visual_summary(self) -> None:
         harness = FinalEvidenceHarness()
         visual = make_evidence(
-            "cardinal-image",
+            "manual-image",
             citation_id="E1",
             score=1.0,
             chunk_type="image",
             image_id="img-1",
-            text="图片实际内容 这是 LinnSequencer 32轨 MIDI 序列录音机的产品说明页，文字清晰可识别。",
+            text="图片实际内容 这是一页工业传感器安装手册，包含接线图、端口标注和维护说明。",
         )
 
         answer = harness._build_local_structured_evidence_answer(
-            question="扫描型 PDF `ocrmypdf_cardinal_scanned.pdf` 的图片内容是什么？",
+            question="What does the scanned PDF image show?",
             evidence=[visual],
         )
 
-        self.assertIn("LinnSequencer 32 轨 MIDI", answer)
+        self.assertIn("工业传感器安装手册", answer)
         self.assertIn("[E1]", answer)
+
+
+    def test_local_answer_prefers_sentence_level_efficiency_support(self) -> None:
+        harness = FinalEvidenceHarness()
+        table_decoy = make_evidence(
+            "table-decoy",
+            citation_id="E1",
+            score=1.0,
+            chunk_type="table",
+            text="Table 4 | Setting | Result | 91.0 | 92.0 | The table reports scores for several runs.",
+        )
+        direct = make_evidence(
+            "direct-efficiency",
+            citation_id="E2",
+            score=0.72,
+            text=(
+                "The approach reduces trainable parameters by 100 times and lowers memory use "
+                "while adding no inference latency."
+            ),
+        )
+
+        answer = harness._build_local_structured_evidence_answer(
+            question="What efficiency benefit does the approach report for trainable parameters and memory?",
+            evidence=[table_decoy, direct],
+        )
+
+        self.assertIn("[E2]", answer)
+        if "[E1]" in answer:
+            self.assertLess(answer.index("[E2]"), answer.index("[E1]"))
+
+    def test_local_answer_prefers_method_quote_over_result_table_for_method_question(self) -> None:
+        harness = FinalEvidenceHarness()
+        table_decoy = make_evidence(
+            "result-table",
+            citation_id="E1",
+            score=1.0,
+            chunk_type="table",
+            text="Table 1 | Method | Score | Error | Variant A | 88.0 | 12.0.",
+        )
+        direct = make_evidence(
+            "method-quote",
+            citation_id="E2",
+            score=0.70,
+            text="The method architecture uses a lightweight encoder and a scoring head trained with a contrastive objective.",
+        )
+
+        answer = harness._build_local_structured_evidence_answer(
+            question="What method architecture does the approach use?",
+            evidence=[table_decoy, direct],
+        )
+
+        self.assertIn("[E2]", answer)
+        if "[E1]" in answer:
+            self.assertLess(answer.index("[E2]"), answer.index("[E1]"))
 
 
 if __name__ == "__main__":

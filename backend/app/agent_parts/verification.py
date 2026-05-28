@@ -30,8 +30,8 @@ class AgentVerificationMixin:
                 "runtime": [
                     *state.get("runtime", []),
                     RuntimeStep(
-                        node="evidence_judge",
-                        title="证据裁判",
+                        node="retrieval_agent",
+                        title="检索 Agent 筛选证据",
                         detail="没有可裁判的证据，后续回答会按证据不足处理。",
                     ),
                 ],
@@ -97,8 +97,8 @@ class AgentVerificationMixin:
             "runtime": [
                 *state.get("runtime", []),
                 RuntimeStep(
-                    node="evidence_judge",
-                    title="证据裁判",
+                    node="retrieval_agent",
+                    title="检索 Agent 筛选证据",
                     detail=(
                         "已逐条判断证据是否直接支撑问题："
                         f"直接 {verdict_counts.get('direct', 0)} 条、辅助 {verdict_counts.get('supporting', 0)} 条、"
@@ -136,8 +136,8 @@ class AgentVerificationMixin:
             "runtime": [
                 *state.get("runtime", []),
                 RuntimeStep(
-                    node="verifier",
-                    title="交叉验证",
+                    node="audit_agent",
+                    title="审核 Agent 交叉验证",
                     detail=detail,
                 ),
             ],
@@ -575,8 +575,6 @@ class AgentVerificationMixin:
             "保护隐私": "privacy",
             "隐私保护": "privacy",
             "预训练": "pre-training",
-            "掩码语言模型": "masked language model",
-            "下一句预测": "next sentence prediction",
             "目标": "objective",
             "零样本": "zero-shot",
         }

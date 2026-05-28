@@ -74,9 +74,11 @@ def main() -> None:
         embedding_model=args.embedding_model,
         top_k=args.top_k,
         experiment_metadata=baseline_metadata(baseline),
+        audit_gold_evidence=args.audit_gold,
     )
     result_path = settings.eval_results_dir / f"{run.run_id}.json"
     metadata = baseline_metadata(baseline)
+    report_path = write_eval_markdown_report(run, metadata=metadata, result_path=result_path) if args.write_report else None
     case_summaries = [
         {
             "case_id": result.case_id,
@@ -116,6 +118,7 @@ def main() -> None:
                 "avg_latency_ms": run.avg_latency_ms,
                 "cases": case_summaries,
                 "result_path": str(result_path),
+                "report_path": str(report_path) if report_path else "",
             },
             ensure_ascii=False,
             indent=2,
@@ -146,6 +149,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--chat-model", default=None, help="覆盖对话模型")
     parser.add_argument("--embedding-model", default=None, help="覆盖 embedding 模型")
     parser.add_argument("--top-k", type=int, default=None, help="覆盖检索 top-k")
+    parser.add_argument("--write-report", action="store_true", help="在 eval_runs 目录额外写入 Markdown 报告")
+    parser.add_argument("--audit-gold", action="store_true", help="记录 gold evidence 在候选、检索选入、prompt 和引用阶段的命中情况")
     parser.add_argument("--list-baselines", action="store_true", help="列出可用评测基线后退出")
     return parser.parse_args()
 
@@ -204,6 +209,120 @@ def print_baselines() -> None:
             indent=2,
         )
     )
+
+
+def write_eval_markdown_report(
+    run,
+    *,
+    metadata: dict,
+    result_path: Path,
+) -> Path:
+    report_path = result_path.with_suffix(".md")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        render_eval_markdown_report(run, metadata=metadata, result_path=result_path),
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def render_eval_markdown_report(
+    run,
+    *,
+    metadata: dict,
+    result_path: Path,
+) -> str:
+    baseline_label = str(metadata.get("baseline_label") or metadata.get("baseline_id") or run.suite_name)
+    lines = [
+        f"# Evaluation Report: {run.suite_name}",
+        "",
+        f"- Baseline: {baseline_label}",
+        f"- Run ID: {run.run_id}",
+        f"- Created: {run.created_at or ''}",
+        f"- Cases: {run.case_count}",
+        f"- Pass rate: {run.pass_rate:.3f} ({run.pass_count} passed / {run.fail_count} failed)",
+        f"- Evaluation trustworthy: {run.evaluation_trustworthy}",
+        f"- Retrieval hit rate: {run.retrieval_hit_rate:.3f}",
+        f"- Citation hit rate: {run.citation_hit_rate:.3f}",
+        f"- Avg retrieval recall at k: {run.avg_context_recall:.3f}",
+        f"- Avg citation support rate: {run.avg_context_precision:.3f}",
+        f"- Avg answer point coverage: {run.avg_keyword_hit_rate:.3f}",
+        f"- Embedding fallback rate: {run.embedding_fallback_rate:.3f}",
+        f"- JSON result: `{result_path}`",
+        "",
+        "## Failure Categories",
+        "",
+    ]
+    if run.failure_category_counts:
+        for category, count in sorted(run.failure_category_counts.items(), key=lambda item: (-item[1], item[0])):
+            lines.append(f"- {category}: {count}")
+    else:
+        lines.append("- None")
+
+    lines.extend(
+        [
+            "",
+            "## Cases",
+            "",
+            "| Case | Status | Score | Evidence | Citations | Failures |",
+            "| --- | --- | ---: | ---: | ---: | --- |",
+        ]
+    )
+    for result in run.results:
+        failures = ", ".join(result.failure_categories) or "-"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(result.case_id),
+                    _markdown_cell(result.result_status),
+                    f"{result.score:.3f}",
+                    str(result.evidence_count),
+                    f"{result.valid_citation_count}/{result.citation_count}",
+                    _markdown_cell(failures),
+                ]
+            )
+            + " |"
+        )
+
+    audit_rows = []
+    for result in run.results:
+        audit = result.trace_summary.get("gold_evidence_audit", {}) if result.trace_summary else {}
+        summary = audit.get("summary", {}) if isinstance(audit, dict) else {}
+        gold_count = int(summary.get("gold_count") or 0)
+        if gold_count:
+            audit_rows.append((result.case_id, gold_count, summary))
+    if audit_rows:
+        lines.extend(
+            [
+                "",
+                "## Gold Evidence Audit",
+                "",
+                "| Case | Candidate | Selected | Prompt | Visible | Cited |",
+                "| --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for case_id, gold_count, summary in audit_rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _markdown_cell(case_id),
+                        f"{int(summary.get('candidate') or 0)}/{gold_count}",
+                        f"{int(summary.get('retrieval_selected') or 0)}/{gold_count}",
+                        f"{int(summary.get('prompt') or 0)}/{gold_count}",
+                        f"{int(summary.get('visible') or 0)}/{gold_count}",
+                        f"{int(summary.get('cited') or 0)}/{gold_count}",
+                    ]
+                )
+                + " |"
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _markdown_cell(value: str) -> str:
+    return str(value or "").replace("|", "\\|").replace("\n", " ").strip()
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from backend.app.evaluation import score_smoke_case
+from backend.app.evaluation import answer_point_coverage, evidence_matches_gold, score_smoke_case
 from backend.app.models import EvaluationCase, EvidenceItem
 
 
@@ -92,6 +92,22 @@ class SmokeEvaluationTests(unittest.TestCase):
 
         self.assertEqual(metrics["status"], "fail")
         self.assertIn("embedding_fallback", metrics["failure_categories"])
+
+    def test_gold_matching_normalizes_pdf_ligatures(self) -> None:
+        evidence = make_evidence(
+            text="The method uses a compound coef\ufb01cient to scale network width, depth, and resolution."
+        )
+
+        self.assertTrue(
+            evidence_matches_gold(
+                evidence,
+                {
+                    "document": "network.docx",
+                    "text_contains": ["compound coefficient", "width, depth, and resolution"],
+                },
+            )
+        )
+        self.assertEqual(answer_point_coverage(["coefficient"], "compound coef\ufb01cient"), 1.0)
 
 
 if __name__ == "__main__":

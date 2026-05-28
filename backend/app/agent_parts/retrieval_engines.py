@@ -90,10 +90,13 @@ class AgentRetrievalEngineMixin:
 
     def _bm25_query_tokens(self, *, question: str, soft_intent: dict[str, Any]) -> list[str]:
         weighted_terms: list[str] = []
-        weighted_terms.extend(self._question_keywords(question))
+        for item in [*self._question_keywords(question), *self._question_keyphrases(question)]:
+            weighted_terms.extend(self._bm25_tokens(str(item)))
         for item in soft_intent.get("focus", []):
             weighted_terms.extend(self._bm25_tokens(str(item)))
             weighted_terms.extend(self._bm25_tokens(str(item)))
+        for role in self._paper_structure_roles_for_question(question, soft_intent=soft_intent):
+            weighted_terms.extend(self._bm25_role_terms(role)[:10])
         for role in soft_intent.get("preferred_roles", []):
             weighted_terms.extend(self._bm25_role_terms(str(role)))
 
@@ -111,6 +114,9 @@ class AgentRetrievalEngineMixin:
         return cleaned
 
     def _bm25_role_terms(self, role: str) -> list[str]:
+        structure_terms = self._paper_structure_role_terms(role, kind="query")
+        if structure_terms:
+            return structure_terms
         role_terms = {
             "purpose": ["摘要", "目的", "本文", "研究目的", "in", "paper"],
             "approach": ["方法", "采用", "通过", "实验", "模型", "method"],
@@ -342,20 +348,11 @@ class AgentRetrievalEngineMixin:
         return result[:limit]
 
     def _required_evidence_role_terms(self, question: str) -> list[list[str]]:
-        normalized = question.lower()
         roles: list[list[str]] = []
-        if self._looks_like_broad_overview_question(question) or any(term in question for term in ["概括", "核心贡献", "主要贡献"]):
-            roles.append(["abstract", "propose", "contribution", "conclusion", "本文", "提出"])
-        if any(term in question for term in ["方法", "机制", "结构", "架构", "组成", "作用"]) or any(term in normalized for term in ["method", "architecture"]):
-            roles.append(["architecture", "method", "objective", "model", "consists", "path", "attention"])
-        if self._looks_like_metric_result_question(question):
-            roles.append(["result", "results", "table", "benchmark", "bleu", "glue", "squad", "isbi", "error", "%"])
-        if self._looks_like_visual_retrieval_question(question):
-            roles.append(["figure", "fig.", "caption", "architecture", "diagram"])
-        if any(term in question for term in ["局限", "代价", "不足", "限制"]) or "limitation" in normalized:
-            roles.append(["cost", "drawback", "reduced", "limitation", "however", "but"])
-        if any(term in question for term in ["语料", "数据", "训练"]) or any(term in normalized for term in ["corpus", "training"]):
-            roles.append(["training", "corpus", "dataset", "data augmentation", "pre-training"])
+        for role in self._paper_structure_roles_for_question(question):
+            terms = self._paper_structure_role_terms(role, kind="evidence")
+            if terms:
+                roles.append(terms[:12])
         return roles[:3]
 
     def _role_balance_drop_index(self, *, question: str, evidence: list[EvidenceItem]) -> int | None:

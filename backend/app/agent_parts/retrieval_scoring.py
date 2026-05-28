@@ -1,11 +1,474 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from backend.app.models import EvidenceItem
 
 
 class AgentRetrievalScoringMixin:
+    def _paper_structure_signal_definitions(self) -> dict[str, dict[str, tuple[str, ...]]]:
+        return {
+            "purpose": {
+                "query": (
+                    "abstract",
+                    "introduction",
+                    "motivation",
+                    "contribution",
+                    "main contribution",
+                    "proposed approach",
+                    "in this paper",
+                    "in this work",
+                ),
+                "evidence": (
+                    "abstract",
+                    "introduction",
+                    "motivation",
+                    "contribution",
+                    "we propose",
+                    "we present",
+                    "we introduce",
+                    "we describe",
+                    "we demonstrate",
+                    "in this paper",
+                    "in this work",
+                ),
+                "triggers": (
+                    "abstract",
+                    "summary",
+                    "overview",
+                    "main idea",
+                    "contribution",
+                    "what is this paper",
+                    "summarize",
+                    "概括",
+                    "总结",
+                    "主要贡献",
+                    "核心贡献",
+                    "摘要",
+                ),
+            },
+            "approach": {
+                "query": (
+                    "method",
+                    "approach",
+                    "architecture",
+                    "algorithm",
+                    "framework",
+                    "model",
+                    "pipeline",
+                    "design",
+                    "objective",
+                    "definition",
+                    "mechanism",
+                    "implementation",
+                ),
+                "evidence": (
+                    "method",
+                    "approach",
+                    "architecture",
+                    "algorithm",
+                    "framework",
+                    "model",
+                    "pipeline",
+                    "design",
+                    "objective",
+                    "definition",
+                    "defined as",
+                    "is designed to",
+                    "consists of",
+                    "allows us",
+                    "we propose",
+                    "we introduce",
+                    "we use",
+                ),
+                "triggers": (
+                    "main idea",
+                    "idea",
+                    "method",
+                    "approach",
+                    "architecture",
+                    "algorithm",
+                    "framework",
+                    "model",
+                    "pipeline",
+                    "design",
+                    "objective",
+                    "mechanism",
+                    "adaptation",
+                    "how does",
+                    "方法",
+                    "机制",
+                    "架构",
+                    "结构",
+                    "模型",
+                    "流程",
+                    "如何",
+                ),
+            },
+            "claim": {
+                "query": (
+                    "experimental results",
+                    "evaluation",
+                    "benchmark",
+                    "result",
+                    "performance",
+                    "metric",
+                    "score",
+                    "ablation",
+                    "comparison",
+                    "finding",
+                    "efficiency",
+                    "benefit",
+                    "memory",
+                    "parameters",
+                    "speed",
+                ),
+                "evidence": (
+                    "result",
+                    "results",
+                    "experimental results",
+                    "evaluation",
+                    "benchmark",
+                    "performance",
+                    "metric",
+                    "score",
+                    "accuracy",
+                    "error",
+                    "ablation",
+                    "comparison",
+                    "achieves",
+                    "outperforms",
+                    "state-of-the-art",
+                    "faster",
+                    "smaller",
+                    "efficient",
+                    "efficiency",
+                    "memory",
+                    "parameters",
+                    "we find",
+                    "we show",
+                ),
+                "triggers": (
+                    "result",
+                    "results",
+                    "performance",
+                    "benchmark",
+                    "report",
+                    "reported",
+                    "benefit",
+                    "benefits",
+                    "efficiency",
+                    "efficient",
+                    "faster",
+                    "smaller",
+                    "memory",
+                    "parameter",
+                    "parameters",
+                    "metric",
+                    "score",
+                    "accuracy",
+                    "error",
+                    "experiment",
+                    "evaluation",
+                    "ablation",
+                    "结果",
+                    "指标",
+                    "表现",
+                    "实验",
+                    "评测",
+                    "消融",
+                ),
+            },
+            "dataset": {
+                "query": (
+                    "dataset",
+                    "training data",
+                    "corpus",
+                    "data collection",
+                    "data source",
+                    "samples",
+                    "annotations",
+                    "benchmark dataset",
+                    "split",
+                    "preprocessing",
+                ),
+                "evidence": (
+                    "dataset",
+                    "training data",
+                    "corpus",
+                    "data collection",
+                    "data source",
+                    "samples",
+                    "annotations",
+                    "train",
+                    "validation",
+                    "test set",
+                    "preprocessing",
+                ),
+                "triggers": (
+                    "dataset",
+                    "training data",
+                    "corpus",
+                    "data",
+                    "sample",
+                    "annotation",
+                    "split",
+                    "数据集",
+                    "训练数据",
+                    "语料",
+                    "样本",
+                    "标注",
+                    "规模",
+                ),
+            },
+            "visual": {
+                "query": (
+                    "figure",
+                    "fig.",
+                    "caption",
+                    "diagram",
+                    "overview",
+                    "architecture diagram",
+                    "workflow",
+                    "image",
+                    "chart",
+                ),
+                "evidence": (
+                    "figure",
+                    "fig.",
+                    "caption",
+                    "diagram",
+                    "overview",
+                    "architecture",
+                    "workflow",
+                    "image",
+                    "chart",
+                ),
+                "triggers": (
+                    "figure",
+                    "fig.",
+                    "image",
+                    "diagram",
+                    "chart",
+                    "visual",
+                    "caption",
+                    "图",
+                    "图片",
+                    "图表",
+                    "示意图",
+                ),
+            },
+            "table": {
+                "query": (
+                    "table",
+                    "rows",
+                    "columns",
+                    "metric",
+                    "score",
+                    "benchmark",
+                    "comparison",
+                    "ablation",
+                ),
+                "evidence": (
+                    "table",
+                    "metric",
+                    "score",
+                    "benchmark",
+                    "comparison",
+                    "ablation",
+                    "accuracy",
+                    "error",
+                ),
+                "triggers": (
+                    "table",
+                    "row",
+                    "column",
+                    "metric",
+                    "score",
+                    "表",
+                    "表格",
+                    "指标",
+                ),
+            },
+            "caveat": {
+                "query": (
+                    "limitation",
+                    "limitations",
+                    "drawback",
+                    "challenge",
+                    "risk",
+                    "failure case",
+                    "future work",
+                    "constraint",
+                ),
+                "evidence": (
+                    "limitation",
+                    "limitations",
+                    "drawback",
+                    "challenge",
+                    "risk",
+                    "failure",
+                    "constraint",
+                    "however",
+                    "future work",
+                ),
+                "triggers": (
+                    "limitation",
+                    "drawback",
+                    "challenge",
+                    "risk",
+                    "failure",
+                    "future work",
+                    "局限",
+                    "不足",
+                    "限制",
+                    "风险",
+                    "挑战",
+                    "未来",
+                ),
+            },
+            "conclusion": {
+                "query": (
+                    "conclusion",
+                    "discussion",
+                    "summary",
+                    "future work",
+                    "implication",
+                ),
+                "evidence": (
+                    "conclusion",
+                    "discussion",
+                    "summary",
+                    "future work",
+                    "implication",
+                    "we conclude",
+                ),
+                "triggers": (
+                    "conclusion",
+                    "discussion",
+                    "future work",
+                    "takeaway",
+                    "结论",
+                    "讨论",
+                    "启示",
+                    "未来",
+                ),
+            },
+            "reference": {
+                "query": ("references", "bibliography", "cited work", "citation"),
+                "evidence": ("references", "bibliography", "citation"),
+                "triggers": ("reference", "references", "bibliography", "引用", "参考文献"),
+            },
+            "field": {
+                "query": ("title", "authors", "date", "keywords", "metadata"),
+                "evidence": ("title", "authors", "date", "keywords"),
+                "triggers": ("title", "author", "date", "keyword", "标题", "作者", "日期", "关键词"),
+            },
+        }
+
+    def _paper_structure_role_alias(self, role: str) -> str:
+        normalized = str(role or "").strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "result": "claim",
+            "results": "claim",
+            "finding": "claim",
+            "findings": "claim",
+            "performance": "claim",
+            "metric": "claim",
+            "evaluation": "claim",
+            "experiment": "claim",
+            "method": "approach",
+            "methods": "approach",
+            "architecture": "approach",
+            "requirement": "approach",
+            "step": "approach",
+            "implementation": "approach",
+            "data": "dataset",
+            "training_data": "dataset",
+            "corpus": "dataset",
+            "image": "visual",
+            "figure": "visual",
+            "fig": "visual",
+            "caption": "visual",
+            "bibliography": "reference",
+            "metadata": "field",
+        }
+        return aliases.get(normalized, normalized)
+
+    def _paper_structure_role_terms(self, role: str, *, kind: str = "query") -> list[str]:
+        canonical = self._paper_structure_role_alias(role)
+        definition = self._paper_structure_signal_definitions().get(canonical, {})
+        terms = definition.get(kind) or definition.get("query") or ()
+        return [term for term in terms if term]
+
+    def _paper_structure_roles_for_question(
+        self,
+        question: str,
+        soft_intent: dict[str, Any] | None = None,
+    ) -> list[str]:
+        soft_intent = soft_intent or {}
+        normalized = " ".join(str(question or "").lower().split())
+        roles: list[str] = []
+
+        def add(role: str) -> None:
+            canonical = self._paper_structure_role_alias(role)
+            if canonical and canonical not in roles and canonical in self._paper_structure_signal_definitions():
+                roles.append(canonical)
+
+        for role in soft_intent.get("preferred_roles", []):
+            add(str(role))
+
+        intent = str(soft_intent.get("intent") or "")
+        scope = str(soft_intent.get("scope") or "")
+        if intent in {"document_wide_question", "compare_question"} or scope in {"whole_document", "multi_document"}:
+            for role in ["purpose", "approach", "claim", "conclusion"]:
+                add(role)
+
+        for role, definition in self._paper_structure_signal_definitions().items():
+            if any(trigger.lower() in normalized for trigger in definition.get("triggers", ())):
+                add(role)
+
+        for method_name, role in [
+            ("_looks_like_broad_overview_question", "purpose"),
+            ("_looks_like_metric_result_question", "claim"),
+            ("_looks_like_visual_retrieval_question", "visual"),
+            ("_looks_like_table_question", "table"),
+            ("_looks_like_dataset_or_scale_question", "dataset"),
+        ]:
+            checker = getattr(self, method_name, None)
+            if callable(checker) and checker(question):
+                add(role)
+
+        if "claim" in roles and "table" not in roles and any(term in normalized for term in ["table", "表格", "表"]):
+            add("table")
+        if "visual" in roles and "approach" not in roles and any(term in normalized for term in ["architecture", "workflow", "diagram", "架构", "流程"]):
+            add("approach")
+
+        return roles[:5]
+
+    def _paper_structure_section_role_bonus(self, section: str) -> dict[str, float]:
+        normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", str(section or "").lower()).strip()
+        if not normalized:
+            return {}
+        rules: list[tuple[tuple[str, ...], dict[str, float]]] = [
+            (("abstract", "摘要"), {"purpose": 1.0, "claim": 0.35}),
+            (("introduction", "intro", "引言", "绪论"), {"purpose": 0.45, "claim": 0.15}),
+            (("method", "methods", "approach", "model", "architecture", "方法", "模型", "架构"), {"approach": 0.9}),
+            (("data", "dataset", "materials", "corpus", "数据", "语料"), {"dataset": 0.85, "approach": 0.15}),
+            (("experiment", "experiments", "evaluation", "result", "results", "实验", "结果", "评测"), {"claim": 0.9, "table": 0.2}),
+            (("discussion", "讨论"), {"claim": 0.35, "caveat": 0.35, "conclusion": 0.2}),
+            (("conclusion", "summary", "结论", "总结"), {"conclusion": 1.0, "claim": 0.35}),
+            (("limitation", "limitations", "future", "局限", "限制", "未来"), {"caveat": 1.0, "conclusion": 0.35}),
+            (("reference", "references", "bibliography", "参考文献"), {"reference": 1.0}),
+        ]
+        bonus: dict[str, float] = {}
+        for markers, role_bonus in rules:
+            if any(marker in normalized for marker in markers):
+                for role, value in role_bonus.items():
+                    bonus[role] = max(bonus.get(role, 0.0), value)
+        return bonus
+
     def _candidate_has_embedded_noise(self, item: EvidenceItem) -> bool:
         text = self._sanitize_evidence_text(item.text)
         return (
@@ -72,25 +535,10 @@ class AgentRetrievalScoringMixin:
         return max((role_scores.get(role, 0.0) for role in roles), default=0.0)
 
     def _normalized_preferred_roles(self, soft_intent: dict[str, Any]) -> list[str]:
-        aliases = {
-            "result": "claim",
-            "results": "claim",
-            "finding": "claim",
-            "findings": "claim",
-            "method": "approach",
-            "methods": "approach",
-            "requirement": "approach",
-            "step": "approach",
-            "implementation": "approach",
-            "risk": "caveat",
-            "limitation": "caveat",
-            "bibliography": "reference",
-            "metadata": "field",
-        }
         roles: list[str] = []
         for raw in soft_intent.get("preferred_roles", []):
-            role = aliases.get(str(raw).strip(), str(raw).strip())
-            if role and role not in roles:
+            role = self._paper_structure_role_alias(str(raw).strip())
+            if role and role not in roles and role in self._paper_structure_signal_definitions():
                 roles.append(role)
         return roles
 
@@ -99,14 +547,10 @@ class AgentRetrievalScoringMixin:
         rows: list[dict[str, Any]],
     ) -> dict[str, list[tuple[float, dict[str, Any]]]]:
         scored: dict[str, list[tuple[float, dict[str, Any]]]] = {
-            "purpose": [],
-            "approach": [],
-            "claim": [],
-            "conclusion": [],
-            "caveat": [],
-            "example": [],
-            "informative": [],
+            role: [] for role in self._paper_structure_signal_definitions()
         }
+        scored["example"] = []
+        scored["informative"] = []
         total = max(len(rows), 1)
         for index, row in enumerate(rows):
             text = str(row.get("text", ""))
@@ -143,109 +587,21 @@ class AgentRetrievalScoringMixin:
     ) -> dict[str, float]:
         normalized = " ".join(self._sanitize_evidence_text(text).lower().split())
         role_keywords = {
-            "purpose": [
-                "摘要",
-                "abstract",
-                "本文",
-                "本研究",
-                "本文围绕",
-                "本文旨在",
-                "研究目的",
-                "主要讨论",
-                "主要介绍",
-                "目的",
-                "aim",
-                "purpose",
-                "in this paper",
-                "in this work",
-            ],
-            "approach": [
-                "采用",
-                "方法",
-                "通过",
-                "基于",
-                "设计",
-                "构建",
-                "实验",
-                "分析",
-                "模型",
-                "框架",
-                "流程",
-                "method",
-                "approach",
-                "experiment",
-                "model",
-                "framework",
-            ],
-            "claim": [
-                "认为",
-                "提出",
-                "指出",
-                "发现",
-                "表明",
-                "结果",
-                "显示",
-                "证明",
-                "suggest",
-                "show",
-                "find",
-                "propose",
-                "result",
-            ],
-            "conclusion": [
-                "结论",
-                "总结",
-                "总体而言",
-                "综上",
-                "启示",
-                "建议",
-                "展望",
-                "conclusion",
-                "discussion",
-                "future work",
-            ],
-            "caveat": [
-                "局限",
-                "不足",
-                "风险",
-                "挑战",
-                "限制",
-                "问题",
-                "需要注意",
-                "隐私",
-                "偏差",
-                "偏见",
-                "诚信",
-                "责任",
-                "依赖",
-                "边界",
-                "代价",
-                "limitation",
-                "risk",
-                "challenge",
-            ],
-            "example": [
-                "例如",
-                "案例",
-                "场景",
-                "应用",
-                "实践",
-                "sample",
-                "case",
-                "scenario",
-                "application",
-            ],
+            role: list(definition.get("evidence", ()))
+            for role, definition in self._paper_structure_signal_definitions().items()
         }
-        section_bonus = {
-            "Abstract": {"purpose": 1.0, "claim": 0.35},
-            "Introduction": {"purpose": 0.35, "claim": 0.15},
-            "Methods": {"approach": 0.9},
-            "Results": {"claim": 0.9},
-            "Discussion": {"claim": 0.4, "caveat": 0.35},
-            "Conclusion": {"conclusion": 1.0, "claim": 0.45},
-            "Limitations": {"caveat": 1.0},
-            "FutureWork": {"conclusion": 0.45, "caveat": 0.45},
-        }.get(section, {})
+        role_keywords["example"] = [
+            "例如",
+            "案例",
+            "场景",
+            "应用",
+            "实践",
+            "sample",
+            "case",
+            "scenario",
+            "application",
+        ]
+        section_bonus = self._paper_structure_section_role_bonus(section)
         position_bonus = 0.35 if index <= max(2, int(total * 0.08)) else 0.0
         scores: dict[str, float] = {}
         for role, keywords in role_keywords.items():
@@ -255,7 +611,10 @@ class AgentRetrievalScoringMixin:
                 score += position_bonus
             if role in {"conclusion", "caveat"} and index >= int(total * 0.65):
                 score += 0.2
+            if role in {"claim", "table"} and self._is_table_like_text(text):
+                score += 0.25
+            if role == "visual" and any(marker in normalized for marker in ["figure", "fig.", "caption", "diagram", "图"]):
+                score += 0.2
             if score > 0:
                 scores[role] = score
         return scores
-

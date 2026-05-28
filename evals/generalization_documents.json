@@ -1,0 +1,25 @@
+{
+  "description": "Document list for the generalization_gold_v1 benchmark. Download these PDFs into data/eval_documents and index them through the app before running the baseline.",
+  "documents": [
+    {
+      "file_name": "efficientnet.pdf",
+      "url": "https://arxiv.org/pdf/1905.11946",
+      "topic": "compound model scaling, depth/width/resolution balance, ImageNet efficiency"
+    },
+    {
+      "file_name": "focal-loss.pdf",
+      "url": "https://arxiv.org/pdf/1708.02002",
+      "topic": "focal loss, dense object detection, class imbalance"
+    },
+    {
+      "file_name": "simclr.pdf",
+      "url": "https://arxiv.org/pdf/2002.05709",
+      "topic": "contrastive learning, data augmentation, self-supervised visual representations"
+    },
+    {
+      "file_name": "lora.pdf",
+      "url": "https://arxiv.org/pdf/2106.09685",
+      "topic": "parameter-efficient adaptation, low-rank updates, trainable parameter reduction"
+    }
+  ]
+}

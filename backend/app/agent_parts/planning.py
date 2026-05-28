@@ -58,7 +58,7 @@ class AgentPlanningMixin:
             "needs_retrieval": needs_retrieval,
             "runtime": [
                 *state.get("runtime", []),
-                RuntimeStep(node="planner", title="判断路径", detail=detail),
+                RuntimeStep(node="main_agent", title="主 Agent 判断路径", detail=detail),
             ],
         }
 
@@ -665,10 +665,15 @@ class AgentPlanningMixin:
                 "we present",
                 "we introduce",
                 "we show",
-                "transformer",
-                "attention",
-                "sequence transduction",
-                "machine translation",
+                "method",
+                "architecture",
+                "model",
+                "training",
+                "experiment",
+                "evaluation",
+                "dataset",
+                "benchmark",
+                "result",
             ])
         if any(word in question for word in ["能学到", "学到什么", "收获", "启发"]):
             keywords.extend(["机制", "应用场景", "学习支持", "风险", "治理", "人机协同", "数据", "隐私", "算法", "价值"])
@@ -695,8 +700,12 @@ class AgentPlanningMixin:
         return any(word in question for word in ["概括", "总结", "讲了什么", "讲啥", "讲了啥", "写了啥", "写的啥", "说了啥", "主要内容", "大意", "一句话", "目的", "主题", "能学到", "学到什么", "收获", "启发"])
 
     def _looks_like_compare_question(self, question: str) -> bool:
+        normalized = question.lower()
         keywords = ["对比", "比较", "不同点", "差异", "区别", "有什么不同", "哪里不同"]
-        return any(keyword in question for keyword in keywords)
+        english_keywords = ["compare", "comparison", "different", "differences", "versus", " vs "]
+        return any(keyword in question for keyword in keywords) or any(
+            keyword in normalized for keyword in english_keywords
+        )
 
     def _looks_like_reference_question(self, question: str) -> bool:
         normalized = question.lower().strip()

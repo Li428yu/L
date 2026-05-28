@@ -83,7 +83,7 @@ class AgentEvidenceCoverageMixin:
                 metrics=metrics,
             )
 
-        if metrics["all_final_labels_weak_or_noise"]:
+        if metrics["all_final_labels_weak_or_noise"] and not self._weak_label_set_still_has_usable_support(metrics):
             return self._coverage_refuse(
                 reason_code="all_final_evidence_weak_or_noise",
                 reason="最终证据的质量标签全部是 weak/noise，没有强支撑证据。",
@@ -219,6 +219,15 @@ class AgentEvidenceCoverageMixin:
             "reason": reason,
             "metrics": metrics,
         }
+
+    def _weak_label_set_still_has_usable_support(self, metrics: dict[str, Any]) -> bool:
+        if str(metrics.get("evidence_quality") or "") != "strong":
+            return False
+        if not metrics.get("has_direct_or_supporting_judgment"):
+            return False
+        if int(metrics.get("prompt_evidence_count") or 0) <= 0:
+            return False
+        return float(metrics.get("best_relevance") or 0.0) >= 0.24
 
     def _evidence_has_image_signal(self, item: EvidenceItem) -> bool:
         chunk_type = (item.chunk_type or "").lower()

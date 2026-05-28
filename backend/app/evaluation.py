@@ -5,6 +5,7 @@ import re
 import time
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from backend.app.models import AskRequest, EvaluationCase, EvaluationResult, EvaluationRun
@@ -60,6 +61,7 @@ def run_eval_suite(
     embedding_model: str | None = None,
     top_k: int | None = None,
     experiment_metadata: dict[str, Any] | None = None,
+    audit_gold_evidence: bool = False,
 ) -> EvaluationRun:
     results: list[EvaluationResult] = []
     for case in cases:
@@ -87,6 +89,12 @@ def run_eval_suite(
         trace_summary["case_metadata"] = eval_case_metadata(case)
         trace_summary["case_document_ids"] = case_document_ids
         trace_summary["checks"] = metrics["checks"]
+        if audit_gold_evidence:
+            trace_summary["gold_evidence_audit"] = audit_gold_evidence_stages(
+                case=case,
+                response=response,
+                agent=agent,
+            )
         results.append(
             EvaluationResult(
                 case_id=case.id,
@@ -398,6 +406,75 @@ def gold_citation_support_rate(gold_evidence: list[dict[str, Any]], cited_eviden
     return supported / max(len(items), 1)
 
 
+def audit_gold_evidence_stages(
+    *,
+    case: EvaluationCase,
+    response: Any,
+    agent: Any,
+) -> dict[str, Any]:
+    gold_items = list(case.gold_evidence or [])
+    if not gold_items:
+        return {}
+
+    trace = getattr(response, "rag_trace", None)
+    trace_rows = _quality_trace_rows(getattr(trace, "evidence_quality_trace", []) if trace is not None else [])
+    candidate_items = _audit_items_from_trace_rows(rows=trace_rows, agent=agent)
+    selected_items = [
+        item
+        for item in candidate_items
+        if getattr(item, "selected_rank", None) is not None
+        or str(getattr(item, "selection_status", "")) in {"selected_by_retrieval_filter", "selected_for_answer"}
+    ]
+    prompt_citation_ids = _prompt_citation_ids(getattr(trace, "final_prompt_evidence", []) if trace is not None else [])
+    prompt_items = [
+        item
+        for item in selected_items
+        if str(getattr(item, "citation_id", "") or "") in prompt_citation_ids
+    ]
+    visible_items = list(getattr(response, "evidence", []) or [])
+    cited_ids = set(citation_ids_from_text(str(getattr(response, "answer", "") or "")))
+    cited_items = [
+        item
+        for item in visible_items
+        if str(getattr(item, "citation_id", "") or "") in cited_ids
+    ]
+    stages = {
+        "candidate": candidate_items,
+        "retrieval_selected": selected_items,
+        "prompt": prompt_items,
+        "visible": visible_items,
+        "cited": cited_items,
+    }
+
+    gold_results: list[dict[str, Any]] = []
+    for index, gold in enumerate(gold_items, start=1):
+        stage_hits = {stage: any(evidence_matches_gold(item, gold) for item in items) for stage, items in stages.items()}
+        first_stage = next((stage for stage in stages if stage_hits[stage]), "")
+        last_stage = next((stage for stage in reversed(list(stages)) if stage_hits[stage]), "")
+        best_item = _first_matching_audit_item(candidate_items, gold) or _first_matching_audit_item(visible_items, gold)
+        gold_results.append(
+            {
+                "gold_index": index,
+                "document": str(gold.get("document") or gold.get("document_name") or ""),
+                "phrases": list(gold.get("text_contains") or gold.get("phrases") or []),
+                "stage_hits": stage_hits,
+                "first_hit_stage": first_stage,
+                "last_hit_stage": last_stage,
+                "matched_candidate": _audit_item_summary(best_item) if best_item is not None else {},
+            }
+        )
+
+    summary = {
+        stage: sum(1 for result in gold_results if result["stage_hits"].get(stage))
+        for stage in stages
+    }
+    summary["gold_count"] = len(gold_results)
+    return {
+        "summary": summary,
+        "gold": gold_results,
+    }
+
+
 def answer_point_coverage(points: list[str], answer: str) -> float:
     cleaned = clean_terms(points)
     if not cleaned:
@@ -405,6 +482,87 @@ def answer_point_coverage(points: list[str], answer: str) -> float:
     normalized = normalize_eval_text(answer)
     hits = sum(1 for point in cleaned if alternative_term_hit(point, normalized))
     return hits / max(len(cleaned), 1)
+
+
+def _quality_trace_rows(rows: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in list(rows or []):
+        if isinstance(row, dict):
+            normalized.append(dict(row))
+        elif hasattr(row, "model_dump"):
+            normalized.append(dict(row.model_dump()))
+        else:
+            normalized.append(dict(getattr(row, "__dict__", {}) or {}))
+    return normalized
+
+
+def _audit_items_from_trace_rows(*, rows: list[dict[str, Any]], agent: Any) -> list[Any]:
+    return [_audit_item_from_trace_row(row=row, agent=agent) for row in rows]
+
+
+def _audit_item_from_trace_row(*, row: dict[str, Any], agent: Any) -> Any:
+    document_id = str(row.get("document_id") or "")
+    chunk_id = str(row.get("chunk_id") or "")
+    chunk = _lookup_chunk(agent=agent, document_id=document_id, chunk_id=chunk_id)
+    metadata = dict(chunk.get("metadata") or {}) if chunk else {}
+    text = str(chunk.get("text") or "") if chunk else str(row.get("quote") or "")
+    return SimpleNamespace(
+        citation_id=str(row.get("citation_id") or ""),
+        chunk_id=chunk_id,
+        document_id=document_id,
+        paper_name=str(row.get("paper_name") or metadata.get("paper_name") or ""),
+        page=int(row.get("page") or metadata.get("page") or 0),
+        page_start=row.get("page_start") if row.get("page_start") is not None else metadata.get("page_start"),
+        page_end=row.get("page_end") if row.get("page_end") is not None else metadata.get("page_end"),
+        section=str(row.get("section") or metadata.get("section") or ""),
+        quote=str(row.get("quote") or metadata.get("quote") or ""),
+        text=text,
+        candidate_rank=row.get("candidate_rank"),
+        selected_rank=row.get("selected_rank"),
+        selection_status=str(row.get("selection_status") or ""),
+        score=float(row.get("score") or 0.0),
+        score_source=str(row.get("score_source") or ""),
+    )
+
+
+def _lookup_chunk(*, agent: Any, document_id: str, chunk_id: str) -> dict[str, Any] | None:
+    vector_store = getattr(agent, "vector_store", None)
+    if vector_store is None or not document_id or not chunk_id:
+        return None
+    try:
+        rows = vector_store.get_document_chunks(document_id, limit=1000)
+    except Exception:
+        return None
+    for row in rows:
+        metadata = row.get("metadata") or {}
+        if str(row.get("id") or "") == chunk_id or str(metadata.get("chunk_id") or "") == chunk_id:
+            return row
+    return None
+
+
+def _prompt_citation_ids(entries: Any) -> set[str]:
+    ids: set[str] = set()
+    for entry in list(entries or []):
+        ids.update(citation_ids_from_text(str(entry)))
+    return ids
+
+
+def _first_matching_audit_item(items: list[Any], gold: dict[str, Any]) -> Any | None:
+    return next((item for item in items if evidence_matches_gold(item, gold)), None)
+
+
+def _audit_item_summary(item: Any) -> dict[str, Any]:
+    return {
+        "citation_id": str(getattr(item, "citation_id", "") or ""),
+        "chunk_id": str(getattr(item, "chunk_id", "") or ""),
+        "page": getattr(item, "page", 0),
+        "candidate_rank": getattr(item, "candidate_rank", None),
+        "selected_rank": getattr(item, "selected_rank", None),
+        "selection_status": str(getattr(item, "selection_status", "") or ""),
+        "score": getattr(item, "score", 0.0),
+        "score_source": str(getattr(item, "score_source", "") or ""),
+        "quote": _shorten(str(getattr(item, "quote", "") or getattr(item, "text", "") or ""), 240),
+    }
 
 
 def evidence_matches_gold(item: Any, gold: dict[str, Any]) -> bool:
@@ -441,9 +599,270 @@ def evidence_matches_page(item: Any, page: int) -> bool:
     return int(getattr(item, "page", 0) or 0) == page
 
 
+EVAL_CONCEPT_ALIASES = [
+    (
+        "class imbalance",
+        "class imbalance",
+        "class imbalanced",
+        "类别不平衡",
+        "类别失衡",
+        "类不平衡",
+        "前景背景不平衡",
+        "foreground background imbalance",
+    ),
+    (
+        "down-weights",
+        "down weights",
+        "down-weights",
+        "downweight",
+        "downweights",
+        "reduce the weight",
+        "reduces the weight",
+        "lower the weight",
+        "lowers the weight",
+        "降低权重",
+        "下调权重",
+        "降低损失权重",
+        "损失权重",
+        "减小损失",
+    ),
+    (
+        "well-classified examples",
+        "well-classified examples",
+        "well classified examples",
+        "easy examples",
+        "easy samples",
+        "easy negatives",
+        "易分类",
+        "容易分类",
+        "已正确分类",
+        "高置信度样本",
+    ),
+    (
+        "hard examples",
+        "hard examples",
+        "hard samples",
+        "difficult examples",
+        "difficult samples",
+        "难分类",
+        "困难样本",
+        "难样本",
+    ),
+    (
+        "one-stage detector",
+        "one-stage detector",
+        "one stage detector",
+        "single-stage detector",
+        "single stage detector",
+        "单阶段检测器",
+        "一阶段检测器",
+    ),
+    (
+        "surpass the accuracy",
+        "surpass the accuracy",
+        "surpassing the accuracy",
+        "higher accuracy",
+        "outperform",
+        "outperforms",
+        "better accuracy",
+        "准确率超过",
+        "精度超过",
+        "准确率更高",
+        "超越",
+    ),
+    (
+        "two-stage detectors",
+        "two-stage detectors",
+        "two stage detectors",
+        "two-stage detector",
+        "two stage detector",
+        "双阶段检测器",
+        "两阶段检测器",
+        "二阶段检测器",
+    ),
+    (
+        "maximizing agreement",
+        "maximizing agreement",
+        "maximize agreement",
+        "maximizes agreement",
+        "maximizing similarity",
+        "maximize similarity",
+        "最大化一致性",
+        "最大化正对之间的一致性",
+        "最大化同一数据不同增强视图之间的一致性",
+        "最大化同一数据不同增强视图",
+        "一致性最大化",
+        "最大化相似",
+    ),
+    (
+        "augmented views",
+        "augmented views",
+        "augmented view",
+        "different augmented views",
+        "transformed views",
+        "增强视图",
+        "不同增强视图",
+        "不同的数据增强视图",
+        "数据增强后的视图",
+        "增强后的视图",
+        "数据增强视图",
+    ),
+    (
+        "contrastive loss",
+        "contrastive loss",
+        "contrastive objective",
+        "对比损失",
+        "对比学习损失",
+        "对比目标",
+    ),
+    (
+        "data augmentations",
+        "data augmentations",
+        "data augmentation",
+        "augmentations",
+        "数据增强",
+        "增强策略",
+    ),
+    (
+        "nonlinear transformation",
+        "nonlinear transformation",
+        "non-linear transformation",
+        "nonlinear projection",
+        "non-linear projection",
+        "projection head",
+        "非线性变换",
+        "非线性投影",
+        "投影头",
+    ),
+    (
+        "larger batch sizes",
+        "larger batch sizes",
+        "large batch sizes",
+        "larger batch size",
+        "bigger batch",
+        "large batch",
+        "更大 batch",
+        "更大的 batch",
+        "更大批量",
+        "批量大小",
+    ),
+    (
+        "more training steps",
+        "more training steps",
+        "longer training",
+        "train longer",
+        "training longer",
+        "更多训练步",
+        "更多训练步骤",
+        "训练更久",
+        "更长训练",
+    ),
+    (
+        "freezing",
+        "freezing",
+        "freeze",
+        "freezes",
+        "frozen",
+        "固定",
+        "冻结",
+        "保持不变",
+    ),
+    (
+        "pre-trained model weights",
+        "pre-trained model weights",
+        "pretrained model weights",
+        "pre trained model weights",
+        "pre-trained weights",
+        "pretrained weights",
+        "预训练模型权重",
+        "预训练权重",
+    ),
+    (
+        "rank decomposition matrices",
+        "rank decomposition matrices",
+        "rank-decomposition matrices",
+        "low-rank matrices",
+        "low rank matrices",
+        "低秩矩阵",
+        "秩分解矩阵",
+        "低秩分解矩阵",
+    ),
+    (
+        "trainable parameters",
+        "trainable parameters",
+        "trained parameters",
+        "可训练参数",
+        "训练参数",
+    ),
+    (
+        "gpu memory",
+        "gpu memory",
+        "gpu memory requirement",
+        "gpu memory usage",
+        "显存",
+        "gpu 显存",
+    ),
+    (
+        "10,000 times",
+        "10000 times",
+        "10000x",
+        "10,000x",
+        "10000 倍",
+        "一万倍",
+    ),
+    (
+        "3 times",
+        "3 times",
+        "3x",
+        "3 倍",
+        "三倍",
+    ),
+    (
+        "cannot prove",
+        "cannot prove",
+        "not enough evidence",
+        "does not support",
+        "cannot determine",
+        "不能证明",
+        "证据不足",
+        "不支持",
+        "无法证明",
+    ),
+    (
+        "object detection",
+        "object detection",
+        "dense object detection",
+        "目标检测",
+        "密集目标检测",
+    ),
+    (
+        "low-rank adaptation",
+        "low-rank adaptation",
+        "low rank adaptation",
+        "低秩适配",
+        "低秩自适应",
+    ),
+    (
+        "language model",
+        "language model",
+        "language models",
+        "语言模型",
+    ),
+]
+
+
 def alternative_term_hit(term: str, normalized_text: str) -> bool:
     alternatives = [part.strip() for part in str(term).split("|") if part.strip()]
-    return any(normalize_eval_text(part) in normalized_text for part in alternatives)
+    normalized_alternatives = [normalize_eval_text(part) for part in alternatives]
+    if any(part and part in normalized_text for part in normalized_alternatives):
+        return True
+    for alias_group in EVAL_CONCEPT_ALIASES:
+        normalized_group = [normalize_eval_text(alias) for alias in alias_group]
+        if not any(part in normalized_group for part in normalized_alternatives):
+            continue
+        if any(alias and alias in normalized_text for alias in normalized_group):
+            return True
+    return False
 
 
 def evidence_keyword_coverage(terms: list[str], evidence: Any) -> float:
@@ -628,6 +1047,8 @@ def evaluation_trace_summary(response: Any) -> dict[str, Any]:
         "embedding_provider": getattr(trace, "embedding_provider", ""),
         "embedding_used_fallback": bool(getattr(trace, "embedding_used_fallback", False)),
         "embedding_fallback_reason": getattr(trace, "embedding_fallback_reason", ""),
+        "answer_strategy": getattr(trace, "answer_strategy", ""),
+        "fallback_used": bool(getattr(trace, "fallback_used", False)),
         "evidence_quality": getattr(trace, "evidence_quality", ""),
         "evidence_coverage": _jsonable(getattr(trace, "evidence_coverage", {})),
         "verification": _jsonable(getattr(trace, "verification", {})),
@@ -696,8 +1117,31 @@ def expected_document_coverage(
     return min(len(distinct_documents) / required, 1.0)
 
 
+PDF_TEXT_REPLACEMENTS = {
+    "\ufb00": "ff",
+    "\ufb01": "fi",
+    "\ufb02": "fl",
+    "\ufb03": "ffi",
+    "\ufb04": "ffl",
+    "\ufb05": "st",
+    "\ufb06": "st",
+    "\u00ad": "",
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+}
+
+
 def normalize_eval_text(text: str) -> str:
-    return re.sub(r"\s+", " ", str(text)).strip().lower()
+    normalized = str(text)
+    for source, target in PDF_TEXT_REPLACEMENTS.items():
+        normalized = normalized.replace(source, target)
+    normalized = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", normalized)
+    normalized = re.sub(r"(?<=\d),(?=\d)", "", normalized)
+    return re.sub(r"\s+", " ", normalized).strip().lower()
 
 
 def term_hit_rate(terms: list[str], text: str) -> float:

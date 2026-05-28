@@ -270,6 +270,7 @@ export interface RagTrace {
   document_relation_map?: DocumentRelationItem[];
   multi_document_coverage?: Record<string, unknown>;
   visual_ocr_warnings?: VisualOcrWarning[];
+  agent_calls?: Array<Record<string, unknown>>;
 }
 
 export interface AskResponse {
