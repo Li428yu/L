@@ -18,3 +18,29 @@ python -m backend.app.eval_cli
 ```
 
 输出只保留通过率、失败原因、证据数、引用数、embedding fallback 和结果文件路径。复杂 PDF/DOCX 评测集和旧评分代码已删除，不再保留未接入的评测功能。
+
+## 长期 RAG Gold 基准
+
+`rag_gold_v1` 是长期回归评测，不替代默认 smoke。它使用 3 篇论文、30 条 case，检查 gold evidence、答案要点、引用支撑、拒答、多文档和图表相关问题。
+
+准备评测文档：
+
+```bash
+mkdir -p data/eval_documents
+curl -L -o data/eval_documents/attention-is-all-you-need.pdf https://arxiv.org/pdf/1706.03762
+curl -L -o data/eval_documents/bert.pdf https://arxiv.org/pdf/1810.04805
+curl -L -o data/eval_documents/unet.pdf https://arxiv.org/pdf/1505.04597
+```
+
+文档清单和 sha256 见 `rag_gold_documents.json`。确保 3 篇文档都已通过项目索引，并且 embedding 模型一致后运行：
+
+```bash
+NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost python -m backend.app.eval_cli --baseline rag_gold_v1
+```
+
+核心指标：
+
+- `avg_retrieval_recall_at_k`：检索证据命中 gold evidence 的比例。
+- `avg_citation_support_rate`：回答引用是否支撑 gold evidence。
+- `avg_answer_point_coverage`：回答覆盖 expected answer points 的比例。
+- `embedding_fallback_rate`：是否退回本地 embedding，非 0 时结果不适合做横向比较。

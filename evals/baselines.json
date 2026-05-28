@@ -10,6 +10,16 @@
       "suite_name": "paper_assistant_smoke",
       "document_policy": "all_ready",
       "description": "默认只检查问答链路、证据返回、可点击引用、文档覆盖、关键证据词和 embedding fallback；不作为论文级跑分。"
+    },
+    {
+      "id": "rag_gold_v1",
+      "label": "长期 RAG Gold 基准",
+      "tier": "gold",
+      "status": "supporting",
+      "suite_path": "rag_gold_eval_set.json",
+      "suite_name": "rag_gold_v1",
+      "document_policy": "expected_ready",
+      "description": "3 篇经典论文的长期 RAG 回归评测，覆盖 gold evidence、答案要点、引用支撑、拒答、多文档和图表相关问题。"
     }
   ]
 }

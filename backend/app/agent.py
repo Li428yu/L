@@ -272,7 +272,7 @@ class PaperAgentService(
         evidence: list[EvidenceItem],
         *,
         question: str = "",
-        limit: int = 6,
+        limit: int = 8,
     ) -> list[EvidenceItem]:
         if not evidence:
             return []
@@ -315,6 +315,18 @@ class PaperAgentService(
             visible.append(supplemental[0][2])
         if len(visible) < limit:
             visible_chunks = {f"{item.document_id}:{item.chunk_id}" for item in visible}
+            for item in self._document_coverage_supplemental_evidence(
+                question=question,
+                visible=visible,
+                evidence=evidence,
+            ):
+                key = f"{item.document_id}:{item.chunk_id}"
+                if key in visible_chunks:
+                    continue
+                visible.append(item)
+                visible_chunks.add(key)
+                if len(visible) >= limit:
+                    break
             fallback_ranked = sorted(
                 [
                     (
@@ -341,6 +353,39 @@ class PaperAgentService(
                     limit=limit,
                 )
         return visible[:limit]
+
+    def _document_coverage_supplemental_evidence(
+        self,
+        *,
+        question: str,
+        visible: list[EvidenceItem],
+        evidence: list[EvidenceItem],
+    ) -> list[EvidenceItem]:
+        if not (
+            self._looks_like_compare_question(question)
+            or self._looks_like_multi_document_topic_question(question)
+            or self._looks_like_document_wide_question(question)
+        ):
+            return []
+        visible_documents = {item.document_id for item in visible if item.document_id}
+        missing_documents = [
+            document_id
+            for document_id in dict.fromkeys(item.document_id for item in evidence if item.document_id)
+            if document_id not in visible_documents
+        ]
+        supplemental: list[EvidenceItem] = []
+        for document_id in missing_documents:
+            candidates = [item for item in evidence if item.document_id == document_id]
+            candidates.sort(
+                key=lambda item: (
+                    self._question_relevance_score(question, f"{item.paper_name}\n{item.quote}\n{item.text}"),
+                    item.score,
+                ),
+                reverse=True,
+            )
+            if candidates:
+                supplemental.append(candidates[0])
+        return supplemental
 
     def attach_related_images(
         self,

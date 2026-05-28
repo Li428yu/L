@@ -1,0 +1,376 @@
+{
+  "suite_name": "rag_gold_v1",
+  "description": "长期 RAG gold 基准：3 篇论文、单文档与跨文档问题、gold evidence、answer points、拒答与图表理解。",
+  "cases": [
+    {
+      "id": "attn_summary_001",
+      "case_type": "summary",
+      "difficulty": "easy",
+      "question": "概括 Transformer 论文的核心贡献，并给出原文证据。",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 1, "text_contains": ["new simple network architecture|Transformer", "attention mechanisms"]},
+        {"document": "attention-is-all-you-need.pdf", "page": 10, "text_contains": ["first sequence transduction model", "entirely on attention"]}
+      ],
+      "expected_answer_points": ["Transformer|注意力", "attention mechanism|注意力机制", "sequence transduction|序列转换"]
+    },
+    {
+      "id": "attn_method_002",
+      "case_type": "method",
+      "difficulty": "medium",
+      "question": "Transformer 为什么可以替代循环网络？请说明它依赖的主要机制。",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 2, "text_contains": ["eschewing recurrence", "relying entirely on an attention mechanism"]},
+        {"document": "attention-is-all-you-need.pdf", "page": 5, "text_contains": ["Multi-head attention allows", "different representation subspaces"]}
+      ],
+      "expected_answer_points": ["eschewing recurrence|替代循环", "attention mechanism|注意力机制", "multi-head attention|多头注意力"]
+    },
+    {
+      "id": "attn_result_003",
+      "case_type": "result",
+      "difficulty": "easy",
+      "question": "Transformer 在 WMT 2014 英德翻译上报告了什么关键结果？",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 1, "text_contains": ["28.4 BLEU", "WMT 2014 English"]}
+      ],
+      "expected_answer_points": ["28.4 BLEU", "WMT 2014 English-to-German|英德翻译", "improving over|超过"]
+    },
+    {
+      "id": "attn_limitation_004",
+      "case_type": "limitation",
+      "difficulty": "medium",
+      "question": "论文中提到 self-attention 相比循环层的一个代价或局限是什么？",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 2, "text_contains": ["reduced effective resolution", "averaging attention-weighted positions"]}
+      ],
+      "expected_answer_points": ["reduced effective resolution|有效分辨率降低", "averaging attention-weighted positions|平均注意力加权位置"]
+    },
+    {
+      "id": "attn_terminology_005",
+      "case_type": "method",
+      "difficulty": "medium",
+      "question": "解释 multi-head attention 在这篇论文中的作用。",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 5, "text_contains": ["jointly attend", "different representation subspaces"]}
+      ],
+      "expected_answer_points": ["jointly attend|共同关注", "different representation subspaces|不同表示子空间", "different positions|不同位置"]
+    },
+    {
+      "id": "attn_evidence_location_006",
+      "case_type": "method",
+      "difficulty": "hard",
+      "question": "找出能直接支持“Transformer 完全基于注意力”的证据，并说明它为什么直接相关。",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 10, "text_contains": ["entirely on attention", "replacing the recurrent layers"]}
+      ],
+      "expected_answer_points": ["entirely on attention|完全基于注意力", "replacing the recurrent layers|替代循环层", "direct evidence|直接证据"]
+    },
+    {
+      "id": "attn_figure_007",
+      "case_type": "figure",
+      "difficulty": "medium",
+      "parser_sensitive": true,
+      "question": "Figure 1 展示了 Transformer 的什么结构？请基于图或图附近文字回答。",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 3, "text_contains": ["Figure 1", "model architecture"]},
+        {"document": "attention-is-all-you-need.pdf", "page": 3, "text_contains": ["stacked self-attention", "point-wise"]}
+      ],
+      "expected_answer_points": ["model architecture|模型架构", "stacked self-attention|堆叠自注意力", "encoder|decoder|编码器|解码器"]
+    },
+    {
+      "id": "attn_refusal_008",
+      "case_type": "refusal",
+      "difficulty": "easy",
+      "question": "这篇 Transformer 论文是否证明了它能显著提高临床诊断准确率？",
+      "expected_document": "attention-is-all-you-need.pdf",
+      "expected_refusal": true,
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 1, "text_contains": ["machine translation", "English-to-German"]}
+      ],
+      "expected_answer_points": ["不能证明|无法证明|证据不足|没有证据", "clinical diagnosis|临床诊断"]
+    },
+    {
+      "id": "bert_summary_001",
+      "case_type": "summary",
+      "difficulty": "easy",
+      "question": "概括 BERT 论文的核心贡献，并给出证据。",
+      "expected_document": "bert.pdf",
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 1, "text_contains": ["BERT", "Bidirectional Encoder Representations"]},
+        {"document": "bert.pdf", "page": 1, "text_contains": ["deep bidirectional representations", "unlabeled text"]}
+      ],
+      "expected_answer_points": ["BERT", "Bidirectional Encoder Representations|双向编码器表示", "pre-training|预训练"]
+    },
+    {
+      "id": "bert_method_002",
+      "case_type": "method",
+      "difficulty": "medium",
+      "question": "BERT 的两个预训练任务是什么？它们分别解决什么问题？",
+      "expected_document": "bert.pdf",
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 1, "text_contains": ["masked language model", "predict the original vocabulary id"]},
+        {"document": "bert.pdf", "page": 2, "text_contains": ["next sentence prediction", "text-pair representations"]}
+      ],
+      "expected_answer_points": ["masked language model|MLM|掩码语言模型", "next sentence prediction|NSP|下一句预测", "text-pair representations|句子对表示"]
+    },
+    {
+      "id": "bert_corpus_003",
+      "case_type": "method",
+      "difficulty": "easy",
+      "question": "BERT 预训练使用了哪些语料？请引用原文。",
+      "expected_document": "bert.pdf",
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 5, "text_contains": ["BooksCorpus", "English Wikipedia"]}
+      ],
+      "expected_answer_points": ["BooksCorpus", "English Wikipedia|Wikipedia", "pre-training corpus|预训练语料"]
+    },
+    {
+      "id": "bert_result_004",
+      "case_type": "result",
+      "difficulty": "medium",
+      "question": "BERT 在摘要中报告了哪些代表性 benchmark 结果？",
+      "expected_document": "bert.pdf",
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 1, "text_contains": ["GLUE score", "80.5%"]},
+        {"document": "bert.pdf", "page": 1, "text_contains": ["SQuAD v1.1", "93.2"]}
+      ],
+      "expected_answer_points": ["GLUE|80.5%", "SQuAD v1.1|93.2", "MultiNLI|86.7"]
+    },
+    {
+      "id": "bert_ablation_005",
+      "case_type": "result",
+      "difficulty": "hard",
+      "question": "BERT 论文如何通过消融说明 NSP 或双向训练的重要性？",
+      "expected_document": "bert.pdf",
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 8, "text_contains": ["No NSP", "without the next sentence prediction"]},
+        {"document": "bert.pdf", "page": 8, "text_contains": ["LTR & No NSP", "left-to-right LM"]}
+      ],
+      "expected_answer_points": ["No NSP|去掉 NSP", "LTR|left-to-right|单向", "ablation|消融"]
+    },
+    {
+      "id": "bert_figure_006",
+      "case_type": "figure",
+      "difficulty": "medium",
+      "parser_sensitive": true,
+      "question": "Figure 1 说明了 BERT 的什么使用流程？",
+      "expected_document": "bert.pdf",
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 3, "text_contains": ["Figure 1", "pre-training and fine-tuning procedures"]},
+        {"document": "bert.pdf", "page": 3, "text_contains": ["same architectures", "different output layers"]}
+      ],
+      "expected_answer_points": ["pre-training|预训练", "fine-tuning|微调", "same architecture|相同架构"]
+    },
+    {
+      "id": "bert_evidence_location_007",
+      "case_type": "method",
+      "difficulty": "medium",
+      "question": "找出支持“BERT 是深度双向模型”的原文证据。",
+      "expected_document": "bert.pdf",
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 1, "text_contains": ["deep bidirectional representations", "left and right context"]}
+      ],
+      "expected_answer_points": ["deep bidirectional|深度双向", "left and right context|左右上下文", "evidence|证据"]
+    },
+    {
+      "id": "bert_refusal_008",
+      "case_type": "refusal",
+      "difficulty": "easy",
+      "question": "BERT 论文是否证明了模型能直接用于医学影像分割并达到最佳效果？",
+      "expected_document": "bert.pdf",
+      "expected_refusal": true,
+      "gold_evidence": [
+        {"document": "bert.pdf", "page": 1, "text_contains": ["language processing tasks", "SQuAD"]}
+      ],
+      "expected_answer_points": ["不能证明|无法证明|证据不足|没有证据", "medical image segmentation|医学影像分割"]
+    },
+    {
+      "id": "unet_summary_001",
+      "case_type": "summary",
+      "difficulty": "easy",
+      "question": "概括 U-Net 论文的核心贡献，并给出证据。",
+      "expected_document": "unet.pdf",
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 1, "text_contains": ["Biomedical Image Segmentation", "U-Net"]},
+        {"document": "unet.pdf", "page": 1, "text_contains": ["contracting path", "symmetric expanding path"]}
+      ],
+      "expected_answer_points": ["U-Net", "biomedical image segmentation|生物医学图像分割", "contracting path|expanding path|收缩路径|扩张路径"]
+    },
+    {
+      "id": "unet_method_002",
+      "case_type": "method",
+      "difficulty": "medium",
+      "question": "U-Net 的网络结构由哪些主要部分组成？",
+      "expected_document": "unet.pdf",
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 4, "text_contains": ["contracting path", "expansive path"]},
+        {"document": "unet.pdf", "page": 4, "text_contains": ["typical architecture", "convolutional network"]}
+      ],
+      "expected_answer_points": ["contracting path|收缩路径", "expansive path|扩张路径", "convolutional network|卷积网络"]
+    },
+    {
+      "id": "unet_data_003",
+      "case_type": "method",
+      "difficulty": "medium",
+      "question": "U-Net 如何缓解医学图像标注数据少的问题？",
+      "expected_document": "unet.pdf",
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 1, "text_contains": ["strong use of data augmentation", "annotated samples"]},
+        {"document": "unet.pdf", "page": 3, "text_contains": ["excessive data augmentation", "elastic deformations"]}
+      ],
+      "expected_answer_points": ["data augmentation|数据增强", "elastic deformations|弹性形变", "few training images|标注数据少"]
+    },
+    {
+      "id": "unet_tiling_004",
+      "case_type": "method",
+      "difficulty": "medium",
+      "question": "overlap-tile strategy 在 U-Net 中解决什么问题？",
+      "expected_document": "unet.pdf",
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 3, "text_contains": ["Overlap-tile strategy", "seamless segmentation"]}
+      ],
+      "expected_answer_points": ["overlap-tile strategy|重叠平铺", "seamless segmentation|无缝分割", "large images|大图像"]
+    },
+    {
+      "id": "unet_result_005",
+      "case_type": "result",
+      "difficulty": "medium",
+      "question": "U-Net 在 ISBI 相关挑战中报告了什么效果？",
+      "expected_document": "unet.pdf",
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 1, "text_contains": ["ISBI challenge", "neuronal structures"]},
+        {"document": "unet.pdf", "page": 2, "text_contains": ["won the EM segmentation challenge", "large margin"]}
+      ],
+      "expected_answer_points": ["ISBI", "neuronal structures|神经结构", "won|large margin|获胜|大幅领先"]
+    },
+    {
+      "id": "unet_metric_006",
+      "case_type": "result",
+      "difficulty": "hard",
+      "question": "U-Net 论文在 EM segmentation 评测中提到了哪些误差指标？",
+      "expected_document": "unet.pdf",
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 6, "text_contains": ["warping error", "Rand error"]},
+        {"document": "unet.pdf", "page": 6, "text_contains": ["pixel error"]}
+      ],
+      "expected_answer_points": ["warping error", "Rand error", "pixel error"]
+    },
+    {
+      "id": "unet_figure_007",
+      "case_type": "figure",
+      "difficulty": "medium",
+      "parser_sensitive": true,
+      "question": "Figure 1 展示的 U-Net 架构有什么形状和连接特点？",
+      "expected_document": "unet.pdf",
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 4, "text_contains": ["Figure 1", "contracting path"]},
+        {"document": "unet.pdf", "page": 3, "text_contains": ["u-shaped architecture", "fully connected layers"]}
+      ],
+      "expected_answer_points": ["u-shaped architecture|U 形结构", "contracting path|收缩路径", "expansive path|扩张路径"]
+    },
+    {
+      "id": "unet_refusal_008",
+      "case_type": "refusal",
+      "difficulty": "easy",
+      "question": "U-Net 论文是否证明了它能提升机器翻译 BLEU 分数？",
+      "expected_document": "unet.pdf",
+      "expected_refusal": true,
+      "gold_evidence": [
+        {"document": "unet.pdf", "page": 1, "text_contains": ["Biomedical Image Segmentation", "segmentation"]}
+      ],
+      "expected_answer_points": ["不能证明|无法证明|证据不足|没有证据", "machine translation|机器翻译|BLEU"]
+    },
+    {
+      "id": "cross_task_001",
+      "case_type": "cross_doc",
+      "difficulty": "medium",
+      "question": "比较 Transformer、BERT、U-Net 三篇论文各自解决的主要任务。",
+      "expected_documents": ["attention-is-all-you-need.pdf", "bert.pdf", "unet.pdf"],
+      "required_document_count": 3,
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 1, "text_contains": ["machine translation", "English-to-German"]},
+        {"document": "bert.pdf", "page": 1, "text_contains": ["language processing tasks", "SQuAD"]},
+        {"document": "unet.pdf", "page": 1, "text_contains": ["Biomedical Image Segmentation", "segmentation"]}
+      ],
+      "expected_answer_points": ["machine translation|机器翻译", "language processing|自然语言处理", "biomedical image segmentation|生物医学图像分割"]
+    },
+    {
+      "id": "cross_architecture_002",
+      "case_type": "cross_doc",
+      "difficulty": "hard",
+      "question": "比较三篇论文的模型结构关键词：Transformer、BERT、U-Net 分别依赖什么结构？",
+      "expected_documents": ["attention-is-all-you-need.pdf", "bert.pdf", "unet.pdf"],
+      "required_document_count": 3,
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 5, "text_contains": ["Multi-head attention allows", "representation subspaces"]},
+        {"document": "bert.pdf", "page": 1, "text_contains": ["deep bidirectional representations", "Transformer"]},
+        {"document": "unet.pdf", "page": 4, "text_contains": ["contracting path", "expansive path"]}
+      ],
+      "expected_answer_points": ["multi-head attention|多头注意力", "deep bidirectional|深度双向", "contracting path|expansive path|收缩路径|扩张路径"]
+    },
+    {
+      "id": "cross_training_003",
+      "case_type": "cross_doc",
+      "difficulty": "hard",
+      "question": "比较三篇论文的训练或学习策略：它们分别依赖什么训练目标或数据策略？",
+      "expected_documents": ["attention-is-all-you-need.pdf", "bert.pdf", "unet.pdf"],
+      "required_document_count": 3,
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 1, "text_contains": ["WMT 2014 English", "translation task"]},
+        {"document": "bert.pdf", "page": 1, "text_contains": ["masked language model", "next sentence prediction"]},
+        {"document": "unet.pdf", "page": 3, "text_contains": ["excessive data augmentation", "elastic deformations"]}
+      ],
+      "expected_answer_points": ["translation task|翻译任务", "masked language model|next sentence prediction|MLM|NSP", "data augmentation|elastic deformations|数据增强"]
+    },
+    {
+      "id": "cross_results_004",
+      "case_type": "cross_doc",
+      "difficulty": "hard",
+      "question": "分别列出三篇论文中一个代表性实验结果或 benchmark 证据。",
+      "expected_documents": ["attention-is-all-you-need.pdf", "bert.pdf", "unet.pdf"],
+      "required_document_count": 3,
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 1, "text_contains": ["28.4 BLEU"]},
+        {"document": "bert.pdf", "page": 1, "text_contains": ["GLUE score", "80.5%"]},
+        {"document": "unet.pdf", "page": 2, "text_contains": ["won the EM segmentation challenge", "large margin"]}
+      ],
+      "expected_answer_points": ["28.4 BLEU", "GLUE|80.5%", "EM segmentation|ISBI|large margin"]
+    },
+    {
+      "id": "cross_figures_005",
+      "case_type": "figure",
+      "difficulty": "hard",
+      "parser_sensitive": true,
+      "question": "三篇论文的 Figure 1 分别承担什么说明作用？",
+      "expected_documents": ["attention-is-all-you-need.pdf", "bert.pdf", "unet.pdf"],
+      "required_document_count": 3,
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 3, "text_contains": ["Figure 1", "model architecture"]},
+        {"document": "bert.pdf", "page": 3, "text_contains": ["Figure 1", "pre-training and fine-tuning procedures"]},
+        {"document": "unet.pdf", "page": 4, "text_contains": ["Figure 1", "contracting path"]}
+      ],
+      "expected_answer_points": ["Transformer|model architecture|模型架构", "BERT|pre-training|fine-tuning|预训练|微调", "U-Net|contracting path|expansive path"]
+    },
+    {
+      "id": "cross_refusal_006",
+      "case_type": "refusal",
+      "difficulty": "medium",
+      "question": "这三篇论文合起来是否已经证明了一个统一结论：所有神经网络架构都能在任何领域达到最优？",
+      "expected_documents": ["attention-is-all-you-need.pdf", "bert.pdf", "unet.pdf"],
+      "required_document_count": 3,
+      "expected_refusal": true,
+      "gold_evidence": [
+        {"document": "attention-is-all-you-need.pdf", "page": 1, "text_contains": ["machine translation"]},
+        {"document": "bert.pdf", "page": 1, "text_contains": ["language processing tasks"]},
+        {"document": "unet.pdf", "page": 1, "text_contains": ["Biomedical Image Segmentation"]}
+      ],
+      "expected_answer_points": ["不能证明|无法证明|证据不足|没有证据", "any domain|任何领域|最优"]
+    }
+  ]
+}

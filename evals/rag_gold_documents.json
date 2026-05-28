@@ -1,0 +1,23 @@
+{
+  "description": "长期 RAG gold 评测使用的论文清单。PDF 本体下载到 data/eval_documents，不要求提交到仓库。",
+  "documents": [
+    {
+      "file_name": "attention-is-all-you-need.pdf",
+      "url": "https://arxiv.org/pdf/1706.03762",
+      "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+      "topic": "Transformer architecture, attention mechanism, machine translation"
+    },
+    {
+      "file_name": "bert.pdf",
+      "url": "https://arxiv.org/pdf/1810.04805",
+      "sha256": "5692a5514787a8c6727b4ff3b726a3385798bc68e12138d1d4af83947e2acf6e",
+      "topic": "BERT pre-training, masked language model, next sentence prediction"
+    },
+    {
+      "file_name": "unet.pdf",
+      "url": "https://arxiv.org/pdf/1505.04597",
+      "sha256": "a3172b2124f38e260dc2c7ed968d87c31bc94dbc19a42a7ab3dcbd7534319c44",
+      "topic": "U-Net architecture, biomedical image segmentation"
+    }
+  ]
+}

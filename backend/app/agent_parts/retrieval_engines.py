@@ -281,4 +281,92 @@ class AgentRetrievalEngineMixin:
             per_document_counts[item.document_id] = document_count + 1
             if len(selected) >= limit:
                 break
+        selected = self._ensure_role_balanced_evidence(
+            question=question,
+            selected=selected or evidence[:limit],
+            candidates=evidence,
+            limit=limit,
+        )
         return selected or evidence[:limit]
+
+    def _ensure_role_balanced_evidence(
+        self,
+        *,
+        question: str,
+        selected: list[EvidenceItem],
+        candidates: list[EvidenceItem],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        if not candidates:
+            return selected[:limit]
+        result = list(selected)
+        selected_keys = {f"{item.document_id}:{item.chunk_id}" for item in result}
+        role_terms = self._required_evidence_role_terms(question)
+
+        def candidate_score(item: EvidenceItem, terms: list[str]) -> float:
+            text = self._sanitize_evidence_text(
+                f"{item.paper_name}\n{item.section or ''}\n{item.quote or ''}\n{item.text or ''}"
+            ).lower()
+            hits = sum(1 for term in terms if term.lower() in text)
+            return hits + self._question_relevance_score(question, text) * 0.65 + float(item.score or 0.0) * 0.4
+
+        for terms in role_terms:
+            if any(candidate_score(item, terms) >= 1.0 for item in result):
+                continue
+            ranked = sorted(
+                [
+                    (candidate_score(item, terms), position, item)
+                    for position, item in enumerate(candidates)
+                    if f"{item.document_id}:{item.chunk_id}" not in selected_keys
+                ],
+                key=lambda row: (row[0], -row[1]),
+                reverse=True,
+            )
+            if not ranked or ranked[0][0] < 1.0:
+                continue
+            item = ranked[0][2].model_copy(
+                update={
+                    "quote": self._best_quote_for_question(question, ranked[0][2].text),
+                    "score": max(float(ranked[0][2].score or 0.0), 0.82),
+                    "final_score": max(float(ranked[0][2].final_score or ranked[0][2].score or 0.0), 0.82),
+                }
+            )
+            if len(result) >= limit:
+                drop_index = self._role_balance_drop_index(question=question, evidence=result)
+                if drop_index is None:
+                    continue
+                selected_keys.discard(f"{result[drop_index].document_id}:{result[drop_index].chunk_id}")
+                result.pop(drop_index)
+            result.insert(0, item)
+            selected_keys.add(f"{item.document_id}:{item.chunk_id}")
+        return result[:limit]
+
+    def _required_evidence_role_terms(self, question: str) -> list[list[str]]:
+        normalized = question.lower()
+        roles: list[list[str]] = []
+        if self._looks_like_broad_overview_question(question) or any(term in question for term in ["概括", "核心贡献", "主要贡献"]):
+            roles.append(["abstract", "propose", "contribution", "conclusion", "本文", "提出"])
+        if any(term in question for term in ["方法", "机制", "结构", "架构", "组成", "作用"]) or any(term in normalized for term in ["method", "architecture"]):
+            roles.append(["architecture", "method", "objective", "model", "consists", "path", "attention"])
+        if self._looks_like_metric_result_question(question):
+            roles.append(["result", "results", "table", "benchmark", "bleu", "glue", "squad", "isbi", "error", "%"])
+        if self._looks_like_visual_retrieval_question(question):
+            roles.append(["figure", "fig.", "caption", "architecture", "diagram"])
+        if any(term in question for term in ["局限", "代价", "不足", "限制"]) or "limitation" in normalized:
+            roles.append(["cost", "drawback", "reduced", "limitation", "however", "but"])
+        if any(term in question for term in ["语料", "数据", "训练"]) or any(term in normalized for term in ["corpus", "training"]):
+            roles.append(["training", "corpus", "dataset", "data augmentation", "pre-training"])
+        return roles[:3]
+
+    def _role_balance_drop_index(self, *, question: str, evidence: list[EvidenceItem]) -> int | None:
+        if not evidence:
+            return None
+        scored = [
+            (
+                self._question_relevance_score(question, f"{item.paper_name}\n{item.quote}\n{item.text}") + float(item.score or 0.0) * 0.25,
+                index,
+            )
+            for index, item in enumerate(evidence)
+        ]
+        scored.sort(key=lambda row: row[0])
+        return scored[0][1] if scored else None

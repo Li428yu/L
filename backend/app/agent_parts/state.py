@@ -23,6 +23,7 @@ class PaperAgentState(TypedDict, total=False):
     needs_retrieval: bool
     intent: str
     retrieval_strategy: str
+    retrieval_queries: list[str]
     answer_strategy: str
     fallback_used: bool
     evidence_quality: str

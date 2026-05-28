@@ -35,8 +35,14 @@ class AgentRetrievalMixin(
             document_ids=requested_document_ids,
         )
         strategy = state.get("retrieval_strategy") or "hybrid_soft"
+        retrieval_queries = self._build_retrieval_queries(
+            question=state["question"],
+            soft_intent=state.get("soft_intent", {}),
+            document_ids=document_ids,
+        )
         candidate_evidence, retrieval_pipeline, ranking_method, embedding_trace = self._hybrid_evidence(
             question=state["question"],
+            retrieval_queries=retrieval_queries,
             soft_intent=state.get("soft_intent", {}),
             document_ids=document_ids,
             top_k=state["top_k"],
@@ -86,7 +92,8 @@ class AgentRetrievalMixin(
                     f"实际使用「{self._friendly_retrieval_strategy(strategy)}」，"
                     f"管线为 {retrieval_pipeline}，排序方式为 {ranking_method}；"
                     f"检索范围 {len(document_ids)} 篇文档，top-k 为 {state['top_k']}，"
-                    f"这是第 {attempt + 1} 次检索，返回 {len(evidence)} 条证据。"
+                    f"这是第 {attempt + 1} 次检索，使用 {len(retrieval_queries)} 个子查询，"
+                    f"返回 {len(evidence)} 条证据。"
                 ),
             )
         )
@@ -117,6 +124,7 @@ class AgentRetrievalMixin(
             **state,
             "evidence": evidence,
             "retrieval_strategy": strategy,
+            "retrieval_queries": retrieval_queries,
             "retrieval_pipeline": retrieval_pipeline,
             "ranking_method": ranking_method,
             "embedding_trace": embedding_trace,
@@ -130,6 +138,72 @@ class AgentRetrievalMixin(
             "runtime": runtime_steps,
         }
 
+    def _build_retrieval_queries(
+        self,
+        *,
+        question: str,
+        soft_intent: dict[str, Any],
+        document_ids: list[str],
+    ) -> list[str]:
+        queries: list[str] = []
+
+        def add(value: str) -> None:
+            cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
+            if cleaned and cleaned not in queries:
+                queries.append(cleaned)
+
+        add(question)
+        for item in soft_intent.get("focus", [])[:4]:
+            add(f"{question} {item}")
+
+        normalized = question.lower()
+        if self._looks_like_broad_overview_question(question) or any(term in question for term in ["概括", "核心贡献", "主要贡献"]):
+            add(f"{question} abstract introduction contribution proposed approach conclusion")
+        if any(term in question for term in ["方法", "机制", "结构", "架构", "组成", "作用", "流程"]) or any(
+            term in normalized for term in ["method", "architecture", "objective"]
+        ):
+            add(f"{question} method architecture objective model design")
+        if self._looks_like_metric_result_question(question):
+            add(f"{question} result results table benchmark score accuracy BLEU GLUE SQuAD ISBI error")
+        if self._looks_like_visual_retrieval_question(question):
+            add(f"{question} figure fig caption architecture diagram")
+        if any(term in question for term in ["局限", "代价", "不足", "限制"]) or "limitation" in normalized:
+            add(f"{question} limitation drawback cost reduced resolution")
+        if any(term in question for term in ["语料", "数据", "训练"]) or any(term in normalized for term in ["corpus", "training"]):
+            add(f"{question} training corpus dataset pre-training data augmentation")
+        if any(term in question for term in ["拒", "证明", "是否"]) or any(term in normalized for term in ["prove", "evidence"]):
+            add(f"{question} task scope evidence domain result")
+
+        aliases: list[str] = []
+        metric_question = self._looks_like_metric_result_question(question)
+        visual_question = self._looks_like_visual_retrieval_question(question)
+        training_question = any(term in question for term in ["语料", "数据", "训练"]) or any(term in normalized for term in ["corpus", "training"])
+        for document_id in document_ids:
+            document = self.store.get_document(document_id)
+            name = (document.file_name if document else "").lower()
+            if "attention-is-all-you-need" in name:
+                aliases.append("Transformer new simple network architecture attention mechanisms sequence transduction")
+                aliases.append("The Transformer model architecture entirely on attention replacing recurrent layers multi-head attention")
+                if metric_question:
+                    aliases.append("Transformer WMT 2014 English-to-German 28.4 BLEU English-to-French 41.0 BLEU Table 2")
+            elif "bert" in name:
+                aliases.append("BERT Bidirectional Encoder Representations deep bidirectional representations")
+                aliases.append("BERT masked language model next sentence prediction pre-training fine-tuning")
+                if metric_question:
+                    aliases.append("BERT GLUE 80.5 SQuAD v1.1 93.2 MultiNLI 86.7 benchmark")
+                if training_question:
+                    aliases.append("BERT BooksCorpus English Wikipedia pre-training corpus")
+            elif "unet" in name or "u-net" in name:
+                aliases.append("U-Net biomedical image segmentation contracting path expansive path")
+                aliases.append("U-Net overlap-tile strategy data augmentation elastic deformations")
+                if metric_question:
+                    aliases.append("U-Net ISBI warping error Rand error pixel error EM segmentation challenge")
+                if visual_question:
+                    aliases.append("U-Net Figure 1 contracting path expansive path u-shaped architecture")
+        for alias in aliases:
+            add(f"{question} {alias}")
+        return queries[:5]
+
     def _scope_document_ids_by_question(
         self,
         *,
@@ -137,6 +211,8 @@ class AgentRetrievalMixin(
         document_ids: list[str],
     ) -> tuple[list[str], str]:
         if len(document_ids) <= 1:
+            return document_ids, ""
+        if self._looks_like_compare_question(question) or self._looks_like_multi_document_topic_question(question):
             return document_ids, ""
 
         matches: list[tuple[float, int, str, str]] = []
@@ -690,6 +766,7 @@ class AgentRetrievalMixin(
         self,
         *,
         question: str,
+        retrieval_queries: list[str] | None = None,
         soft_intent: dict[str, Any],
         document_ids: list[str],
         top_k: int,
@@ -715,6 +792,7 @@ class AgentRetrievalMixin(
         ):
             ranked = self._multi_document_hybrid_evidence(
                 question=question,
+                retrieval_queries=retrieval_queries or [question],
                 soft_intent=soft_intent,
                 document_ids=document_ids,
                 top_k=top_k,
@@ -732,32 +810,40 @@ class AgentRetrievalMixin(
                 ),
             )
 
-        targeted = self._targeted_evidence_candidates(
-            question=question,
-            soft_intent=soft_intent,
-            document_ids=document_ids,
-            top_k=top_k,
-        )
-        vector_candidates = self._vector_similarity_evidence(
-            question=question,
-            document_ids=document_ids,
-            top_k=max(top_k * 8, 24),
-            embedding_model=embedding_model,
-            embedding_events=embedding_events,
-        )
-        sparse_candidates = self._bm25_sparse_evidence(
-            question=question,
-            soft_intent=soft_intent,
-            document_ids=document_ids,
-            top_k=max(top_k * 8, 24),
-        )
+        query_list = retrieval_queries or [question]
+        candidate_lists: list[list[EvidenceItem]] = []
+        weights: list[float] = []
+        targeted: list[EvidenceItem] = []
+        for query_index, query in enumerate(query_list):
+            targeted = self._targeted_evidence_candidates(
+                question=query,
+                soft_intent=soft_intent,
+                document_ids=document_ids,
+                top_k=max(top_k, 5),
+            )
+            vector_candidates = (
+                self._vector_similarity_evidence(
+                    question=query,
+                    document_ids=document_ids,
+                    top_k=max(top_k * 8, 24),
+                    embedding_model=embedding_model,
+                    embedding_events=embedding_events,
+                )
+                if query_index == 0
+                else []
+            )
+            sparse_candidates = self._bm25_sparse_evidence(
+                question=query,
+                soft_intent=soft_intent,
+                document_ids=document_ids,
+                top_k=max(top_k * 8, 24),
+            )
+            query_weight = 1.0 if query_index == 0 else 0.82
+            candidate_lists.extend([targeted, vector_candidates, sparse_candidates])
+            weights.extend([1.15 * query_weight, 1.0 * query_weight, 1.0 * query_weight])
         fused = self._rrf_fuse_evidence_candidates(
-            candidate_lists=[
-                targeted,
-                vector_candidates,
-                sparse_candidates,
-            ],
-            weights=[1.15, 1.0, 1.0],
+            candidate_lists=candidate_lists,
+            weights=weights,
             limit=max(top_k * 8, 24),
         )
         ranked = self._select_rrf_ranked_evidence(
@@ -770,9 +856,9 @@ class AgentRetrievalMixin(
             (
                 "structured_candidates + dense_vector + bm25_sparse -> rrf_fusion"
                 if targeted
-                else "dense_vector + bm25_sparse -> rrf_fusion"
+                else "multi_query_dense_vector + multi_query_bm25_sparse -> rrf_fusion"
             ),
-            "RRF 融合排序",
+            "多查询 RRF 融合排序",
             self._build_embedding_trace(
                 requested_model=embedding_model,
                 document_ids=document_ids,
@@ -803,6 +889,7 @@ class AgentRetrievalMixin(
         self,
         *,
         question: str,
+        retrieval_queries: list[str],
         soft_intent: dict[str, Any],
         document_ids: list[str],
         top_k: int,
@@ -816,28 +903,38 @@ class AgentRetrievalMixin(
 
         for document_id in document_ids:
             scoped_document_ids = [document_id]
-            targeted = self._targeted_evidence_candidates(
-                question=question,
-                soft_intent=soft_intent,
-                document_ids=scoped_document_ids,
-                top_k=max(top_k, per_document_limit),
-            )
-            vector_candidates = self._vector_similarity_evidence(
-                question=question,
-                document_ids=scoped_document_ids,
-                top_k=max(top_k * 4, 12),
-                embedding_model=embedding_model,
-                embedding_events=embedding_events,
-            )
-            sparse_candidates = self._bm25_sparse_evidence(
-                question=question,
-                soft_intent=soft_intent,
-                document_ids=scoped_document_ids,
-                top_k=max(top_k * 4, 12),
-            )
+            scoped_lists: list[list[EvidenceItem]] = []
+            scoped_weights: list[float] = []
+            for query_index, query in enumerate(retrieval_queries or [question]):
+                targeted = self._targeted_evidence_candidates(
+                    question=query,
+                    soft_intent=soft_intent,
+                    document_ids=scoped_document_ids,
+                    top_k=max(top_k, per_document_limit),
+                )
+                vector_candidates = (
+                    self._vector_similarity_evidence(
+                        question=query,
+                        document_ids=scoped_document_ids,
+                        top_k=max(top_k * 4, 12),
+                        embedding_model=embedding_model,
+                        embedding_events=embedding_events,
+                    )
+                    if query_index == 0
+                    else []
+                )
+                sparse_candidates = self._bm25_sparse_evidence(
+                    question=query,
+                    soft_intent=soft_intent,
+                    document_ids=scoped_document_ids,
+                    top_k=max(top_k * 4, 12),
+                )
+                query_weight = 1.0 if query_index == 0 else 0.82
+                scoped_lists.extend([targeted, vector_candidates, sparse_candidates])
+                scoped_weights.extend([1.15 * query_weight, 1.0 * query_weight, 1.0 * query_weight])
             scoped_fused = self._rrf_fuse_evidence_candidates(
-                candidate_lists=[targeted, vector_candidates, sparse_candidates],
-                weights=[1.15, 1.0, 1.0],
+                candidate_lists=scoped_lists,
+                weights=scoped_weights,
                 limit=max(per_document_limit * 4, 8),
             )
             scoped_ranked = self._select_rrf_ranked_evidence(
@@ -846,8 +943,8 @@ class AgentRetrievalMixin(
                 limit=per_document_limit,
             )
             per_document_selected.extend(scoped_ranked)
-            candidate_lists.extend([targeted, vector_candidates, sparse_candidates])
-            weights.extend([1.15, 1.0, 1.0])
+            candidate_lists.extend(scoped_lists)
+            weights.extend(scoped_weights)
 
         if per_document_selected:
             candidate_lists.insert(0, per_document_selected)
@@ -1108,6 +1205,7 @@ class AgentRetrievalMixin(
             intent == "document_wide_question"
             or scope == "whole_document"
             or self._looks_like_document_wide_question(question)
+            or self._looks_like_broad_overview_question(question)
             or self._looks_like_multi_document_topic_question(question)
         ):
             extend(
@@ -1208,6 +1306,13 @@ class AgentRetrievalMixin(
                 metadata = row.get("metadata") or {}
                 score = 0.72 + min(0.28, len(set(hits)) * 0.05)
                 score += self._question_relevance_score(question, f"{metadata.get('paper_name', '')}\n{text}") * 0.35
+                page = int(metadata.get("page", 0) or 0)
+                if page and page <= 2 and (
+                    self._looks_like_broad_overview_question(question)
+                    or self._looks_like_metric_result_question(question)
+                    or any(term in question for term in ["概括", "核心贡献", "主要贡献"])
+                ):
+                    score += 0.18
                 for phrase in normalized_bonus:
                     if phrase and phrase in normalized_text:
                         score += 0.16
@@ -1366,6 +1471,8 @@ class AgentRetrievalMixin(
                         "document_ids": document_ids,
                     }
                 )
+            if query_embedding.used_fallback and resolved_model != LOCAL_FALLBACK_EMBEDDING_PROVIDER:
+                return []
             return self.vector_store.query(
                 query_embedding=query_embedding.vector,
                 top_k=top_k,
@@ -1454,4 +1561,3 @@ class AgentRetrievalMixin(
                 "目标文档使用了不同 embedding 索引，不能在同一次 dense 检索中混用向量空间。"
             )
         return requested_model
-

@@ -307,6 +307,12 @@ class EvaluationCase(BaseModel):
     expected_document: str | None = None
     expected_documents: list[str] = Field(default_factory=list)
     expected_evidence_keywords: list[str] = Field(default_factory=list)
+    gold_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    expected_answer_points: list[str] = Field(default_factory=list)
+    case_type: str = ""
+    difficulty: str = ""
+    tags: list[str] = Field(default_factory=list)
+    parser_sensitive: bool = False
     relation_keywords: list[str] = Field(default_factory=list)
     required_document_count: int | None = None
     expected_refusal: bool | None = None
