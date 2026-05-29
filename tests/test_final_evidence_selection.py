@@ -806,6 +806,84 @@ class FinalEvidenceSelectionTests(unittest.TestCase):
         self.assertIn("adaptation-method", selected_chunks)
         self.assertEqual({"doc-efficient", "doc-adaptation"}, {item.document_id for item in selected})
 
+    def test_compare_efficiency_keeps_expanded_mechanism_sentence(self) -> None:
+        harness = MultiDocumentEvidenceHarness()
+        generic = make_evidence(
+            "efficient-result",
+            score=1.0,
+            document_id="doc-efficient",
+            paper_name="efficient.pdf",
+            text="The result section reports strong accuracy with fewer parameters and better efficiency.",
+        )
+        expanded = make_evidence(
+            "efficient-method:sentence:12",
+            score=0.8,
+            chunk_type="sentence",
+            document_id="doc-efficient",
+            paper_name="efficient.pdf",
+            text=(
+                "In this paper, we propose a compound scaling method using a compound "
+                "coefficient to scale network width, depth, and resolution."
+            ),
+        )
+        expanded.score_source = "expanded_sentence"
+
+        selected = harness._repair_final_evidence_selection(
+            question="Compare how the approaches pursue efficiency.",
+            selected=[generic],
+            candidates=[generic, expanded],
+            limit=1,
+        )
+
+        self.assertEqual(selected[0].chunk_id, "efficient-method:sentence:12")
+        self.assertIn("compound coefficient", selected[0].quote)
+
+    def test_compare_prompt_keeps_mechanism_evidence_from_each_document(self) -> None:
+        harness = MultiDocumentEvidenceHarness()
+        efficient_result = make_evidence(
+            "efficient-result",
+            score=1.0,
+            document_id="doc-efficient",
+            paper_name="efficient.pdf",
+            text="EfficientNet reports strong accuracy with fewer parameters.",
+        )
+        lora_result = make_evidence(
+            "lora-result",
+            score=1.0,
+            document_id="doc-lora",
+            paper_name="lora.pdf",
+            text="LoRA reduces the number of trainable parameters and memory requirement.",
+        )
+        efficient_mechanism = make_evidence(
+            "efficient-method:sentence:12",
+            score=0.9,
+            chunk_type="sentence",
+            document_id="doc-efficient",
+            paper_name="efficient.pdf",
+            text="The method uses a compound coefficient to scale network width, depth, and resolution.",
+        )
+        efficient_mechanism.score_source = "expanded_sentence"
+        lora_mechanism = make_evidence(
+            "lora-method:sentence:04",
+            score=0.9,
+            chunk_type="sentence",
+            document_id="doc-lora",
+            paper_name="lora.pdf",
+            text="LoRA freezes pretrained weights and injects trainable rank decomposition matrices.",
+        )
+        lora_mechanism.score_source = "expanded_sentence"
+
+        prompt_evidence = harness._prefer_direct_support_prompt_evidence(
+            question="Compare how EfficientNet and LoRA pursue efficiency.",
+            selected=[efficient_result, lora_result],
+            candidates=[efficient_result, lora_result, efficient_mechanism, lora_mechanism],
+            limit=4,
+        )
+        prompt_chunks = {item.chunk_id for item in prompt_evidence}
+
+        self.assertIn("efficient-method:sentence:12", prompt_chunks)
+        self.assertIn("lora-method:sentence:04", prompt_chunks)
+
     def test_local_framework_answer_uses_complete_core_evidence(self) -> None:
         harness = FinalEvidenceHarness()
         direct = make_evidence(

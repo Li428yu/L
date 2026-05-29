@@ -109,6 +109,36 @@ class SmokeEvaluationTests(unittest.TestCase):
         )
         self.assertEqual(answer_point_coverage(["coefficient"], "compound coef\ufb01cient"), 1.0)
 
+    def test_gold_matching_accepts_surface_variants_for_mechanism_phrases(self) -> None:
+        efficient = make_evidence(
+            text="The method uniformly scales all dimensions of depth/width/resolution using a compound coefficient."
+        )
+        lora = make_evidence(
+            text=(
+                "LoRA freezes the pretrained model weights and injects trainable "
+                "rank decomposition matrices into each layer."
+            )
+        )
+
+        self.assertTrue(
+            evidence_matches_gold(
+                efficient,
+                {
+                    "document": "network.docx",
+                    "text_contains": ["compound coefficient", "width, depth, and resolution"],
+                },
+            )
+        )
+        self.assertTrue(
+            evidence_matches_gold(
+                lora,
+                {
+                    "document": "network.docx",
+                    "text_contains": ["freezing the pre-trained model weights", "rank decomposition matrices"],
+                },
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

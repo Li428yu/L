@@ -726,7 +726,7 @@ class AgentRetrievalMixin(
             )
             return (
                 self._renumber_evidence(ranked),
-                "per_document_structured + per_document_dense + per_document_bm25 -> balanced_rrf_fusion",
+                "per_document_structured + per_document_multi_query_dense + per_document_multi_query_bm25 -> balanced_rrf_fusion -> evidence_expansion",
                 "按文献配额的 RRF 融合排序",
                 self._build_embedding_trace(
                     requested_model=embedding_model,
@@ -736,9 +736,17 @@ class AgentRetrievalMixin(
             )
 
         query_list = retrieval_queries or [question]
+        vector_candidates_by_query = self._multi_query_vector_evidence(
+            retrieval_queries=query_list,
+            document_ids=document_ids,
+            top_k=max(top_k * 8, 24),
+            embedding_model=embedding_model,
+            embedding_events=embedding_events,
+            max_queries=4,
+        )
         candidate_lists: list[list[EvidenceItem]] = []
         weights: list[float] = []
-        targeted: list[EvidenceItem] = []
+        used_targeted = False
         for query_index, query in enumerate(query_list):
             targeted = self._targeted_evidence_candidates(
                 question=query,
@@ -746,17 +754,9 @@ class AgentRetrievalMixin(
                 document_ids=document_ids,
                 top_k=max(top_k, 5),
             )
-            vector_candidates = (
-                self._vector_similarity_evidence(
-                    question=query,
-                    document_ids=document_ids,
-                    top_k=max(top_k * 8, 24),
-                    embedding_model=embedding_model,
-                    embedding_events=embedding_events,
-                )
-                if query_index == 0
-                else []
-            )
+            if targeted:
+                used_targeted = True
+            vector_candidates = vector_candidates_by_query.get(self._retrieval_query_key(query), [])
             sparse_candidates = self._bm25_sparse_evidence(
                 question=query,
                 soft_intent=soft_intent,
@@ -771,17 +771,22 @@ class AgentRetrievalMixin(
             weights=weights,
             limit=max(top_k * 8, 24),
         )
+        expanded = self._expand_retrieval_candidates(
+            question=question,
+            candidates=fused,
+            limit=max(top_k * 12, 36),
+        )
         ranked = self._select_rrf_ranked_evidence(
             question=question,
-            evidence=fused,
+            evidence=expanded,
             limit=max(top_k * 4, 8),
         )
         return (
             self._renumber_evidence(ranked),
             (
-                "structured_candidates + dense_vector + bm25_sparse -> rrf_fusion"
-                if targeted
-                else "multi_query_dense_vector + multi_query_bm25_sparse -> rrf_fusion"
+                "structured_candidates + multi_query_dense_vector + multi_query_bm25_sparse -> rrf_fusion -> evidence_expansion"
+                if used_targeted
+                else "multi_query_dense_vector + multi_query_bm25_sparse -> rrf_fusion -> evidence_expansion"
             ),
             "多查询 RRF 融合排序",
             self._build_embedding_trace(
@@ -790,6 +795,600 @@ class AgentRetrievalMixin(
                 query_events=embedding_events,
             ),
         )
+
+    def _multi_query_vector_evidence(
+        self,
+        *,
+        retrieval_queries: list[str],
+        document_ids: list[str],
+        top_k: int,
+        embedding_model: str,
+        embedding_events: list[dict[str, Any]] | None = None,
+        max_queries: int = 4,
+    ) -> dict[str, list[EvidenceItem]]:
+        results: dict[str, list[EvidenceItem]] = {}
+        if not retrieval_queries or max_queries <= 0:
+            return results
+
+        seen: set[str] = set()
+        for query in retrieval_queries:
+            query_key = self._retrieval_query_key(query)
+            if not query_key or query_key in seen:
+                continue
+            if len(seen) >= max_queries:
+                break
+            seen.add(query_key)
+            results[query_key] = self._vector_similarity_evidence(
+                question=query_key,
+                document_ids=document_ids,
+                top_k=top_k,
+                embedding_model=embedding_model,
+                embedding_events=embedding_events,
+            )
+        return results
+
+    def _retrieval_query_key(self, query: str) -> str:
+        return re.sub(r"\s+", " ", str(query or "")).strip()
+
+    def _expand_retrieval_candidates(
+        self,
+        *,
+        question: str,
+        candidates: list[EvidenceItem],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        if not candidates:
+            return []
+
+        limit = max(limit, len(candidates))
+        expanded: list[EvidenceItem] = list(candidates)
+        seen_keys = {f"{item.document_id}:{item.chunk_id}" for item in candidates}
+        seen_texts = {
+            self._expansion_text_key(item.text or item.quote)
+            for item in candidates
+            if self._expansion_text_key(item.text or item.quote)
+        }
+        rows_by_document: dict[str, list[dict[str, Any]]] = {}
+        anchors = candidates[: min(len(candidates), 12)]
+        local_limit = min(limit, max(len(candidates), int(limit * 0.65)))
+
+        for anchor_position, anchor in enumerate(anchors):
+            if not anchor.document_id or self._is_visual_evidence_item(anchor):
+                continue
+            rows = rows_by_document.get(anchor.document_id)
+            if rows is None:
+                rows = self.vector_store.get_document_chunks(anchor.document_id, limit=1000)
+                rows_by_document[anchor.document_id] = rows
+            if not rows:
+                continue
+
+            current_index = self._expansion_row_index(rows=rows, chunk_id=anchor.chunk_id)
+            if current_index < 0:
+                continue
+
+            for row_index, proximity_bonus in self._expansion_row_indices(
+                rows=rows,
+                current_index=current_index,
+                anchor=anchor,
+            ):
+                row = rows[row_index]
+                for item in self._evidence_units_from_expansion_row(
+                    question=question,
+                    row=row,
+                    fallback_document_id=anchor.document_id,
+                    anchor=anchor,
+                    row_index=row_index,
+                    anchor_position=anchor_position,
+                    proximity_bonus=proximity_bonus,
+                ):
+                    key = f"{item.document_id}:{item.chunk_id}"
+                    text_key = self._expansion_text_key(item.text)
+                    if key in seen_keys or (text_key and text_key in seen_texts):
+                        continue
+                    if item.score < 0.58:
+                        continue
+                    expanded.append(item)
+                    seen_keys.add(key)
+                    if text_key:
+                        seen_texts.add(text_key)
+                    if len(expanded) >= local_limit:
+                        break
+                if len(expanded) >= local_limit:
+                    break
+            if len(expanded) >= local_limit:
+                break
+
+        if len(expanded) < limit:
+            expanded.extend(
+                self._document_level_expansion_candidates(
+                    question=question,
+                    anchors=anchors,
+                    rows_by_document=rows_by_document,
+                    seen_keys=seen_keys,
+                    seen_texts=seen_texts,
+                    limit=limit - len(expanded),
+                )
+            )
+
+        scored = sorted(
+            [
+                (item.score, self._expansion_granularity_bonus(item), position, item)
+                for position, item in enumerate(expanded)
+            ],
+            key=lambda row: (row[0], row[1], -row[2]),
+            reverse=True,
+        )
+        return [item for _, _, _, item in scored[:limit]]
+
+    def _expansion_granularity_bonus(self, item: EvidenceItem) -> float:
+        chunk_type = str(item.chunk_type or "").lower()
+        score_source = str(item.score_source or "").lower()
+        if chunk_type == "table_row" or score_source == "expanded_table_row":
+            return 0.035
+        if chunk_type == "phrase" or score_source == "expanded_phrase":
+            return 0.03
+        if chunk_type == "sentence" or score_source == "expanded_sentence":
+            return 0.02
+        return 0.0
+
+    def _document_level_expansion_candidates(
+        self,
+        *,
+        question: str,
+        anchors: list[EvidenceItem],
+        rows_by_document: dict[str, list[dict[str, Any]]],
+        seen_keys: set[str],
+        seen_texts: set[str],
+        limit: int,
+    ) -> list[EvidenceItem]:
+        if limit <= 0:
+            return []
+
+        document_order: list[str] = []
+        best_anchor_by_document: dict[str, EvidenceItem] = {}
+        for anchor in anchors:
+            if not anchor.document_id or self._is_visual_evidence_item(anchor):
+                continue
+            if anchor.document_id not in document_order:
+                document_order.append(anchor.document_id)
+            current = best_anchor_by_document.get(anchor.document_id)
+            if current is None or float(anchor.score or 0.0) > float(current.score or 0.0):
+                best_anchor_by_document[anchor.document_id] = anchor
+        if not document_order:
+            return []
+
+        selected: list[EvidenceItem] = []
+        per_document_limit = max(2, min(6, limit // max(len(document_order), 1) + 2))
+        mechanism_priority = self._looks_like_mechanism_expansion_question(question)
+
+        for document_position, document_id in enumerate(document_order):
+            rows = rows_by_document.get(document_id)
+            if rows is None:
+                rows = self.vector_store.get_document_chunks(document_id, limit=1000)
+                rows_by_document[document_id] = rows
+            if not rows:
+                continue
+
+            anchor = best_anchor_by_document.get(document_id)
+            row_candidates: list[tuple[float, float, float, int, int, str, str, dict[str, Any]]] = []
+            for row_index, row in enumerate(rows):
+                metadata = row.get("metadata") or {}
+                chunk_type = str(metadata.get("chunk_type") or "").lower()
+                if "image" in chunk_type:
+                    continue
+                text = self._sanitize_evidence_text(str(row.get("text", "")))
+                if not text.strip():
+                    continue
+
+                units: list[tuple[float, int, str, str]] = []
+                if self._is_table_like_text(text) or "table" in chunk_type:
+                    units.extend(
+                        self._table_row_units_for_expansion(
+                            question=question,
+                            text=text,
+                            max_units=3,
+                        )
+                    )
+                units.extend(
+                    self._sentence_units_for_expansion(
+                        question=question,
+                        text=text,
+                        max_units=5,
+                    )
+                )
+                quote = self._best_quote_for_question(question, text, limit=420)
+                if quote:
+                    quote_score = self._evidence_unit_support_score(
+                        question=question,
+                        text=quote,
+                        anchor=None,
+                        proximity_bonus=0.0,
+                        unit_type="phrase",
+                        section=str(metadata.get("section") or ""),
+                    )
+                    units.append((quote_score, 90, "phrase", quote))
+
+                for unit_score, unit_index, unit_type, unit_text in units:
+                    mechanism_bonus = self._expansion_mechanism_bonus(question=question, text=unit_text)
+                    document_bonus = 0.04 if anchor is not None else 0.0
+                    score = min(1.0, unit_score + mechanism_bonus * 0.45 + document_bonus)
+                    if score < 0.78 and mechanism_bonus < 0.14:
+                        continue
+                    priority = mechanism_bonus if mechanism_priority else score
+                    row_candidates.append(
+                        (
+                            priority,
+                            score,
+                            self._expansion_unit_type_bonus(unit_type),
+                            -row_index,
+                            unit_index,
+                            unit_type,
+                            unit_text,
+                            row,
+                        )
+                    )
+
+            row_candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]), reverse=True)
+            used_parent_rows: set[int] = set()
+            document_selected = 0
+            for _, score, _, negative_row_index, unit_index, unit_type, unit_text, row in row_candidates:
+                row_index = -negative_row_index
+                parent_row_key = row_index
+                if parent_row_key in used_parent_rows and document_selected >= 1:
+                    continue
+                item = self._make_expanded_evidence_item(
+                    row=row,
+                    fallback_document_id=document_id,
+                    unit_text=unit_text,
+                    unit_type=unit_type,
+                    unit_index=unit_index,
+                    score=score,
+                    row_index=row_index,
+                    anchor_position=document_position,
+                    expansion_source="document",
+                )
+                key = f"{item.document_id}:{item.chunk_id}"
+                text_key = self._expansion_text_key(item.text)
+                if key in seen_keys or (text_key and text_key in seen_texts):
+                    continue
+                selected.append(item)
+                seen_keys.add(key)
+                if text_key:
+                    seen_texts.add(text_key)
+                used_parent_rows.add(parent_row_key)
+                document_selected += 1
+                if document_selected >= per_document_limit or len(selected) >= limit:
+                    break
+            if len(selected) >= limit:
+                break
+
+        return selected[:limit]
+
+    def _expansion_unit_type_bonus(self, unit_type: str) -> float:
+        if unit_type == "table_row":
+            return 0.03
+        if unit_type == "phrase":
+            return 0.02
+        if unit_type == "sentence":
+            return 0.01
+        return 0.0
+
+    def _looks_like_mechanism_expansion_question(self, question: str) -> bool:
+        normalized = self._sanitize_evidence_text(question).lower()
+        return any(
+            marker in normalized
+            for marker in [
+                "how",
+                "why",
+                "pursue",
+                "achieve",
+                "improve",
+                "approach",
+                "method",
+                "mechanism",
+                "compare",
+                "如何",
+                "怎么",
+                "怎样",
+                "机制",
+                "方法",
+                "对比",
+            ]
+        )
+
+    def _expansion_mechanism_bonus(self, *, question: str, text: str) -> float:
+        if not self._looks_like_mechanism_expansion_question(question):
+            return 0.0
+        normalized = self._sanitize_evidence_text(text).lower()
+        bonus = 0.0
+        if any(marker in normalized for marker in ["we propose", "propose", "proposed", "method", "approach"]):
+            bonus += 0.06
+        if any(marker in normalized for marker in ["using", "by ", "inject", "injected", "scale", "scaling"]):
+            bonus += 0.04
+        if "compound" in normalized and ("coefficient" in normalized or "scaling" in normalized):
+            bonus += 0.12
+        if all(marker in normalized for marker in ["width", "depth", "resolution"]):
+            bonus += 0.10
+        if "rank decomposition" in normalized or "low-rank" in normalized or "low rank" in normalized:
+            bonus += 0.12
+        if any(marker in normalized for marker in ["freeze", "freezes", "frozen"]) and "weight" in normalized:
+            bonus += 0.10
+        if "trainable" in normalized and any(marker in normalized for marker in ["parameter", "matrix", "matrices"]):
+            bonus += 0.08
+        if any(marker in normalized for marker in ["efficiency", "efficient", "memory", "flops", "latency", "faster", "smaller"]):
+            bonus += 0.05
+        return min(0.32, bonus)
+
+    def _expansion_row_index(self, *, rows: list[dict[str, Any]], chunk_id: str) -> int:
+        for index, row in enumerate(rows):
+            metadata = row.get("metadata") or {}
+            if str(row.get("id") or "") == chunk_id or str(metadata.get("chunk_id") or "") == chunk_id:
+                return index
+        return -1
+
+    def _expansion_row_indices(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        current_index: int,
+        anchor: EvidenceItem,
+    ) -> list[tuple[int, float]]:
+        selected: dict[int, float] = {current_index: 0.18}
+        for offset, bonus in [(-1, 0.12), (1, 0.12), (-2, 0.08), (2, 0.08)]:
+            index = current_index + offset
+            if 0 <= index < len(rows):
+                selected[index] = max(selected.get(index, 0.0), bonus)
+
+        anchor_pages = {
+            page
+            for page in range(int(anchor.page_start or anchor.page or 0), int(anchor.page_end or anchor.page or 0) + 1)
+            if page > 0
+        }
+        anchor_section = (anchor.section or "").strip().lower()
+        for index, row in enumerate(rows):
+            metadata = row.get("metadata") or {}
+            page_start = int(metadata.get("page_start", metadata.get("page", 0)) or 0)
+            page_end = int(metadata.get("page_end", metadata.get("page", 0)) or 0)
+            row_pages = {page for page in range(page_start, page_end + 1) if page > 0}
+            if anchor_pages and row_pages and anchor_pages & row_pages:
+                selected[index] = max(selected.get(index, 0.0), 0.09)
+
+            row_section = str(metadata.get("section") or "").strip().lower()
+            if anchor_section and row_section and row_section == anchor_section and abs(index - current_index) <= 6:
+                selected[index] = max(selected.get(index, 0.0), 0.07)
+
+        ranked = sorted(selected.items(), key=lambda row: (abs(row[0] - current_index), -row[1]))
+        return [(index, bonus) for index, bonus in ranked[:10]]
+
+    def _evidence_units_from_expansion_row(
+        self,
+        *,
+        question: str,
+        row: dict[str, Any],
+        fallback_document_id: str,
+        anchor: EvidenceItem,
+        row_index: int,
+        anchor_position: int,
+        proximity_bonus: float,
+    ) -> list[EvidenceItem]:
+        metadata = row.get("metadata") or {}
+        text = self._sanitize_evidence_text(str(row.get("text", "")))
+        if not text.strip():
+            return []
+
+        units: list[tuple[float, int, str, str]] = []
+        if self._is_table_like_text(text) or "table" in str(metadata.get("chunk_type") or "").lower():
+            units.extend(
+                self._table_row_units_for_expansion(
+                    question=question,
+                    text=text,
+                    max_units=3,
+                )
+            )
+        units.extend(
+            self._sentence_units_for_expansion(
+                question=question,
+                text=text,
+                max_units=4,
+            )
+        )
+
+        quote = self._best_quote_for_question(question, text, limit=360)
+        if quote and quote != self._truncate_readable_text(text, limit=360):
+            quote_score = self._evidence_unit_support_score(
+                question=question,
+                text=quote,
+                anchor=anchor,
+                proximity_bonus=proximity_bonus,
+                unit_type="phrase",
+                section=str(metadata.get("section") or ""),
+            )
+            units.append((quote_score, 90, "phrase", quote))
+
+        ranked_units = sorted(units, key=lambda row: (row[0], -row[1]), reverse=True)
+        evidence: list[EvidenceItem] = []
+        seen_texts: set[str] = set()
+        for unit_score, unit_index, unit_type, unit_text in ranked_units:
+            text_key = self._expansion_text_key(unit_text)
+            if not text_key or text_key in seen_texts:
+                continue
+            seen_texts.add(text_key)
+            if unit_type != "phrase":
+                unit_score = min(1.0, unit_score + min(float(anchor.score or 0.0), 1.0) * 0.18 + proximity_bonus)
+            if unit_score < 0.58:
+                continue
+            evidence.append(
+                self._make_expanded_evidence_item(
+                    row=row,
+                    fallback_document_id=fallback_document_id,
+                    unit_text=unit_text,
+                    unit_type=unit_type,
+                    unit_index=unit_index,
+                    score=unit_score,
+                    row_index=row_index,
+                    anchor_position=anchor_position,
+                )
+            )
+            if len(evidence) >= 4:
+                break
+        return evidence
+
+    def _sentence_units_for_expansion(
+        self,
+        *,
+        question: str,
+        text: str,
+        max_units: int,
+    ) -> list[tuple[float, int, str, str]]:
+        sentences = self._split_quote_sentences(text)
+        units: list[tuple[float, int, str, str]] = []
+        for index, sentence in enumerate(sentences):
+            if len(sentence) < 24:
+                continue
+            unit_text = sentence
+            if len(unit_text) < 90 and index + 1 < len(sentences):
+                unit_text = f"{unit_text} {sentences[index + 1]}"
+            score = self._evidence_unit_support_score(
+                question=question,
+                text=unit_text,
+                anchor=None,
+                proximity_bonus=0.0,
+                unit_type="sentence",
+                section="",
+            )
+            units.append((score, index, "sentence", self._truncate_readable_text(unit_text, limit=520)))
+        units.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        return units[:max_units]
+
+    def _table_row_units_for_expansion(
+        self,
+        *,
+        question: str,
+        text: str,
+        max_units: int,
+    ) -> list[tuple[float, int, str, str]]:
+        rows = self._split_table_rows(text)
+        if not rows:
+            return []
+        header = self._table_header_row(rows)
+        focus_terms = self._quote_focus_terms(question, self._question_keywords(question), [])
+        units: list[tuple[float, int, str, str]] = []
+        for index, row_text in enumerate(rows):
+            if header and row_text == header:
+                continue
+            normalized = row_text.lower()
+            term_hits = sum(1 for term in focus_terms if self._quote_term_present(term, normalized))
+            number_hits = len(re.findall(r"\b\d+(?:\.\d+)?\s*(?:%|x|times|m|b|k|million|billion)?\b", normalized))
+            metric_hits = sum(
+                1
+                for term in ["accuracy", "error", "score", "metric", "result", "auc", "f1", "memory", "parameter", "%"]
+                if term in normalized
+            )
+            if term_hits <= 0 and number_hits <= 0 and metric_hits <= 0:
+                continue
+            unit_text = f"{header} | {row_text}" if header and header not in row_text else row_text
+            score = min(1.0, 0.58 + term_hits * 0.08 + min(number_hits, 4) * 0.08 + metric_hits * 0.07)
+            units.append((score, index, "table_row", self._truncate_readable_text(unit_text, limit=620)))
+        units.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+        return units[:max_units]
+
+    def _evidence_unit_support_score(
+        self,
+        *,
+        question: str,
+        text: str,
+        anchor: EvidenceItem | None,
+        proximity_bonus: float,
+        unit_type: str,
+        section: str,
+    ) -> float:
+        normalized = self._sanitize_evidence_text(text).lower()
+        relevance = self._question_relevance_score(question, normalized)
+        keywords = self._question_keywords(question)[:18]
+        keyphrase_hits = sum(1 for phrase in self._question_keyphrases(question)[:8] if phrase in normalized)
+        keyword_hits = sum(1 for keyword in keywords if keyword.lower() in normalized)
+        numeric_bonus = 0.0
+        if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|times|m|b|k|million|billion)?\b", normalized):
+            numeric_bonus += 0.10
+            if self._looks_like_metric_result_question(question) or self._looks_like_efficiency_or_resource_question(question):
+                numeric_bonus += 0.14
+        unit_bonus = {
+            "table_row": 0.18,
+            "phrase": 0.12,
+            "sentence": 0.08,
+        }.get(unit_type, 0.0)
+        mechanism_bonus = self._expansion_mechanism_bonus(question=question, text=normalized)
+        section_bonus = 0.06 if any(marker in section.lower() for marker in ["result", "experiment", "abstract", "conclusion"]) else 0.0
+        anchor_score = min(float(anchor.score or 0.0), 1.0) * 0.28 if anchor is not None else 0.0
+        score = (
+            0.42
+            + anchor_score
+            + relevance * 0.55
+            + min(keyword_hits, 5) * 0.035
+            + min(keyphrase_hits, 3) * 0.08
+            + numeric_bonus
+            + unit_bonus
+            + mechanism_bonus
+            + section_bonus
+            + proximity_bonus
+        )
+        return max(0.0, min(1.0, score))
+
+    def _make_expanded_evidence_item(
+        self,
+        *,
+        row: dict[str, Any],
+        fallback_document_id: str,
+        unit_text: str,
+        unit_type: str,
+        unit_index: int,
+        score: float,
+        row_index: int,
+        anchor_position: int,
+        expansion_source: str = "neighbor",
+    ) -> EvidenceItem:
+        metadata = row.get("metadata") or {}
+        base_chunk_id = str(metadata.get("chunk_id") or row.get("id") or f"row_{row_index:05d}")
+        page = int(metadata.get("page", metadata.get("page_start", 0)) or 0)
+        page_start = int(metadata.get("page_start", page) or page)
+        page_end = int(metadata.get("page_end", page) or page)
+        quote = self._best_quote_for_question("", unit_text, limit=360)
+        return EvidenceItem(
+            citation_id="",
+            chunk_id=f"{base_chunk_id}:{unit_type}:{unit_index:02d}",
+            document_id=str(metadata.get("document_id", fallback_document_id)),
+            paper_name=str(metadata.get("paper_name", "")),
+            page=page,
+            page_start=page_start,
+            page_end=page_end,
+            section=str(metadata.get("section") or ""),
+            source=str(metadata.get("source", "")),
+            file_hash=str(metadata.get("file_hash", "")),
+            score=score,
+            rule_score=score,
+            final_score=score,
+            score_source=f"expanded_{unit_type}",
+            text=unit_text,
+            quote=quote or self._truncate_readable_text(unit_text, limit=360),
+            char_start=int(metadata.get("char_start", 0) or 0),
+            char_end=int(metadata.get("char_end", 0) or 0),
+            token_count=None,
+            chunk_type=unit_type,
+            parent_id=base_chunk_id,
+            image_id=str(metadata.get("image_id") or "") or None,
+            image_path=str(metadata.get("image_path") or "") or None,
+            bbox_json=str(metadata.get("bbox_json") or "") or None,
+            quality_reasons=[
+                f"expansion_source:{expansion_source}",
+                f"expanded_from_chunk:{base_chunk_id}",
+                f"row_index:{row_index}",
+                f"anchor_rank:{anchor_position + 1}",
+            ],
+        )
+
+    def _expansion_text_key(self, text: str) -> str:
+        normalized = re.sub(r"\s+", " ", self._sanitize_evidence_text(text).lower()).strip()
+        return normalized[:260]
 
     def _should_balance_multi_document_retrieval(
         self,
@@ -830,6 +1429,14 @@ class AgentRetrievalMixin(
             scoped_document_ids = [document_id]
             scoped_lists: list[list[EvidenceItem]] = []
             scoped_weights: list[float] = []
+            vector_candidates_by_query = self._multi_query_vector_evidence(
+                retrieval_queries=retrieval_queries or [question],
+                document_ids=scoped_document_ids,
+                top_k=max(top_k * 4, 12),
+                embedding_model=embedding_model,
+                embedding_events=embedding_events,
+                max_queries=3,
+            )
             for query_index, query in enumerate(retrieval_queries or [question]):
                 targeted = self._targeted_evidence_candidates(
                     question=query,
@@ -837,17 +1444,7 @@ class AgentRetrievalMixin(
                     document_ids=scoped_document_ids,
                     top_k=max(top_k, per_document_limit),
                 )
-                vector_candidates = (
-                    self._vector_similarity_evidence(
-                        question=query,
-                        document_ids=scoped_document_ids,
-                        top_k=max(top_k * 4, 12),
-                        embedding_model=embedding_model,
-                        embedding_events=embedding_events,
-                    )
-                    if query_index == 0
-                    else []
-                )
+                vector_candidates = vector_candidates_by_query.get(self._retrieval_query_key(query), [])
                 sparse_candidates = self._bm25_sparse_evidence(
                     question=query,
                     soft_intent=soft_intent,
@@ -880,9 +1477,14 @@ class AgentRetrievalMixin(
             weights=weights,
             limit=max(top_k * 8, len(document_ids) * per_document_limit),
         )
+        expanded = self._expand_retrieval_candidates(
+            question=question,
+            candidates=fused,
+            limit=max(top_k * 12, len(document_ids) * per_document_limit * 4),
+        )
         return self._select_balanced_multi_document_evidence(
             question=question,
-            evidence=fused,
+            evidence=expanded,
             target_document_ids=document_ids,
             limit=max(top_k * 4, len(document_ids) * 2),
         )
@@ -1620,6 +2222,7 @@ class AgentRetrievalMixin(
                         "used_fallback": query_embedding.used_fallback,
                         "fallback_reason": query_embedding.fallback_reason,
                         "document_ids": document_ids,
+                        "query": question,
                     }
                 )
             if query_embedding.used_fallback and resolved_model != LOCAL_FALLBACK_EMBEDDING_PROVIDER:

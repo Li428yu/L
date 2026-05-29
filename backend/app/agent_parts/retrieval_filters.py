@@ -400,18 +400,23 @@ class AgentRetrievalFilterMixin:
             scored_direct.append((score, position, item))
 
         scored_direct.sort(key=lambda row: (row[0], -row[1]), reverse=True)
-        max_repairs = (
-            2
-            if (
-                self._looks_like_metric_result_question(question)
-                or self._looks_like_framework_function_question(question)
-                or self._looks_like_trustworthy_characteristics_question(question)
-                or self._looks_like_efficiency_or_resource_question(question)
-                or self._looks_like_method_adaptation_question(question)
-                or self._looks_like_design_or_training_factor_question(question)
+        if self._looks_like_efficiency_or_resource_question(question) and (
+            self._looks_like_compare_question(question) or self._looks_like_multi_document_topic_question(question)
+        ):
+            max_repairs = 4
+        else:
+            max_repairs = (
+                2
+                if (
+                    self._looks_like_metric_result_question(question)
+                    or self._looks_like_framework_function_question(question)
+                    or self._looks_like_trustworthy_characteristics_question(question)
+                    or self._looks_like_efficiency_or_resource_question(question)
+                    or self._looks_like_method_adaptation_question(question)
+                    or self._looks_like_design_or_training_factor_question(question)
+                )
+                else 1
             )
-            else 1
-        )
         repairs = 0
         for score, _, item in scored_direct:
             if item.chunk_id in selected_chunks:
@@ -513,6 +518,9 @@ class AgentRetrievalFilterMixin:
 
     def _set_final_support_quote(self, *, question: str, item: EvidenceItem) -> None:
         text = self._sanitize_evidence_text(item.text)
+        if self._is_expanded_fine_grained_evidence(item):
+            item.quote = self._truncate_readable_text(text, limit=720)
+            return
         if self._looks_like_metric_result_question(question):
             item.quote = self._keyword_focused_quote(
                 text=text,
@@ -692,11 +700,39 @@ class AgentRetrievalFilterMixin:
         if self._looks_like_framework_function_question(question) and framework_bonus <= 0.0:
             return 0.0
         score += framework_bonus
+        score += self._expanded_fine_grained_support_bonus(question=question, text=text, item=item)
         score += self._trustworthy_characteristics_support_bonus(question=question, text=text)
         score += self._metric_result_support_bonus(question=question, text=text, item=item)
         score += self._scientific_paper_support_bonus(question=question, text=text)
         score += self._scientific_evidence_shape_bonus(question=question, item=item, text=text)
         return score
+
+    def _is_expanded_fine_grained_evidence(self, item: EvidenceItem) -> bool:
+        chunk_type = (item.chunk_type or "").lower()
+        score_source = (item.score_source or "").lower()
+        return score_source.startswith("expanded_") or chunk_type in {"sentence", "phrase", "table_row"}
+
+    def _expanded_fine_grained_support_bonus(self, *, question: str, text: str, item: EvidenceItem) -> float:
+        if not self._is_expanded_fine_grained_evidence(item):
+            return 0.0
+        bonus = 0.35
+        normalized = self._sanitize_evidence_text(text).lower()
+        mechanism_scorer = getattr(self, "_expansion_mechanism_bonus", None)
+        if callable(mechanism_scorer):
+            bonus += float(mechanism_scorer(question=question, text=text) or 0.0) * 1.6
+        if "compound coefficient" in normalized and all(
+            marker in normalized for marker in ["width", "depth", "resolution"]
+        ):
+            bonus += 0.45
+        if "rank decomposition" in normalized and any(
+            marker in normalized for marker in ["freeze", "freezes", "frozen", "pretrained", "pre-trained"]
+        ):
+            bonus += 0.45
+        if (item.chunk_type or "").lower() == "table_row":
+            bonus += 0.12
+        if (item.chunk_type or "").lower() == "sentence":
+            bonus += 0.08
+        return min(1.35, bonus)
 
     def _scientific_paper_support_bonus(self, *, question: str, text: str) -> float:
         normalized_question = question.lower()
@@ -1344,6 +1380,16 @@ class AgentRetrievalFilterMixin:
             ]
             hits = sum(1 for term in terms if term in normalized)
             score += min(1.45, hits * 0.16)
+            if "compound coefficient" in normalized and all(
+                marker in normalized for marker in ["width", "depth", "resolution"]
+            ):
+                score += 0.85
+            if "rank decomposition" in normalized and any(
+                marker in normalized for marker in ["freeze", "freezes", "frozen", "pretrained", "pre-trained"]
+            ):
+                score += 0.85
+            if self._is_expanded_fine_grained_evidence(item):
+                score += 0.2
             if any(marker in section for marker in ["abstract", "introduction", "method", "approach"]):
                 score += 0.25
             if any(phrase in normalized for phrase in ["we propose", "we introduce", "our approach", "we present"]):

@@ -246,7 +246,63 @@ class AgentAnsweringMixin:
             return value
 
         ranked = sorted(enumerate(pool), key=lambda row: (score(row[1]), -row[0]), reverse=True)
-        return [item for _, item in ranked[:limit]]
+        ranked_items = [item for _, item in ranked]
+        document_ids = list(dict.fromkeys(item.document_id for item in pool if item.document_id))
+        if len(document_ids) > 1 and (
+            self._looks_like_compare_question(question)
+            or self._looks_like_multi_document_topic_question(question)
+            or self._looks_like_broad_overview_question(question)
+        ):
+            balanced: list[EvidenceItem] = []
+            selected_keys: set[str] = set()
+            roles = []
+            role_getter = getattr(self, "_comparative_balance_roles", None)
+            role_candidate_getter = getattr(self, "_best_comparative_role_candidate", None)
+            if callable(role_getter) and callable(role_candidate_getter):
+                roles = role_getter(question=question, document_count=len(document_ids), limit=limit)
+                for role in roles:
+                    for document_id in document_ids:
+                        candidate = role_candidate_getter(
+                            question=question,
+                            evidence=pool,
+                            document_id=document_id,
+                            role=role,
+                            excluded_chunks=selected_keys,
+                        )
+                        if not candidate:
+                            continue
+                        key = f"{candidate.document_id}:{candidate.chunk_id}"
+                        if key in selected_keys:
+                            continue
+                        balanced.append(candidate)
+                        selected_keys.add(key)
+                        if len(balanced) >= limit:
+                            return balanced[:limit]
+
+            for document_id in document_ids:
+                if any(item.document_id == document_id for item in balanced):
+                    continue
+                candidate = next((item for item in ranked_items if item.document_id == document_id), None)
+                if not candidate:
+                    continue
+                key = f"{candidate.document_id}:{candidate.chunk_id}"
+                if key in selected_keys:
+                    continue
+                balanced.append(candidate)
+                selected_keys.add(key)
+                if len(balanced) >= limit:
+                    return balanced[:limit]
+
+            for item in ranked_items:
+                key = f"{item.document_id}:{item.chunk_id}"
+                if key in selected_keys:
+                    continue
+                balanced.append(item)
+                selected_keys.add(key)
+                if len(balanced) >= limit:
+                    break
+            return balanced[:limit]
+        return ranked_items[:limit]
 
     def _build_answer_user_prompt(
         self,
